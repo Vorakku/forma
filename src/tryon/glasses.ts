@@ -1,6 +1,11 @@
 import * as THREE from "three";
 import type { Product } from "@/lib/types";
 import { buildEllis, ELLIS_ACETATE } from "./ellis";
+import { buildBrowline, BROWLINE_ACETATE } from "./browline";
+import {
+  hasReferenceModel,
+  type ReferenceModelSlug,
+} from "@/lib/reference-models";
 
 export const LENS_HEIGHT_RATIO: Record<string, number> = {
   Round: 0.9,
@@ -281,21 +286,32 @@ export function buildGlasses(
 
 // Frames with a reference reconstruction use it everywhere; the rest fall back to the generated outline.
 const REFERENCE_MODELS: Record<
-  string,
+  ReferenceModelSlug,
   (
     color: THREE.ColorRepresentation,
     options: { overlay?: boolean },
   ) => THREE.Group
-> = { "the-ellis": buildEllis };
-const referenceColor = (product: Product, colorIndex: number) =>
-  product.colors?.[colorIndex] !== "Ink black"
+> = {
+  "the-ellis": buildEllis,
+  "the-felix": (color, options) =>
+    buildBrowline(color, { ...options, pattern: color === BROWLINE_ACETATE }),
+};
+const referenceColor = (product: Product, colorIndex: number) => {
+  if (product.slug === "the-felix")
+    return product.colors[colorIndex] === "Chestnut"
+      ? BROWLINE_ACETATE
+      : (product.swatches[colorIndex]?.hex ?? "#737373");
+  return product.colors?.[colorIndex] !== "Ink black"
     ? (product.swatches[colorIndex]?.hex ?? ELLIS_ACETATE)
     : ELLIS_ACETATE;
+};
 export function buildOverlayGlasses(
   product: Product,
   colorIndex: number,
 ): THREE.Group {
-  const reference = REFERENCE_MODELS[product.slug];
+  const reference = hasReferenceModel(product.slug)
+    ? REFERENCE_MODELS[product.slug]
+    : undefined;
   return reference
     ? reference(referenceColor(product, colorIndex), { overlay: true })
     : buildGlasses(product, colorIndex);
@@ -304,7 +320,9 @@ export function buildDisplayGlasses(
   product: Product,
   colorIndex: number,
 ): THREE.Group {
-  const reference = REFERENCE_MODELS[product.slug];
+  const reference = hasReferenceModel(product.slug)
+    ? REFERENCE_MODELS[product.slug]
+    : undefined;
   if (reference) return reference(referenceColor(product, colorIndex), {});
   const group = buildGlasses(product, colorIndex),
     polished = new Map<

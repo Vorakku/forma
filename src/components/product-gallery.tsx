@@ -3,6 +3,7 @@ import { Box } from "lucide-react";
 import { ProductImage } from "./common";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/lib/types";
+import { hasReferenceModel } from "@/lib/reference-models";
 
 const Product3D = lazy(() =>
   import("./product-3d").then((module) => ({ default: module.Product3D })),
@@ -45,7 +46,7 @@ export function ProductGallery({
 }) {
   const [image, setImage] = useState(0),
     [three, setThree] = useState(false),
-    available = product.slug === "the-ellis";
+    available = hasReferenceModel(product.slug);
   const photos = () => setThree(false);
   return (
     <div className="product-gallery">

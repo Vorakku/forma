@@ -103,7 +103,13 @@ const resources = (object) => {
         materials.add(m);
     }
   });
-  return [...geometries, ...materials];
+  const textures = new Set();
+  materials.forEach((material) =>
+    Object.values(material).forEach((value) => {
+      if (value instanceof THREE.Texture) textures.add(value);
+    }),
+  );
+  return [...geometries, ...materials, ...textures];
 };
 const deferred = () => {
   let resolve, reject;
@@ -835,13 +841,26 @@ test("switching frames and colours disposes every unique resource exactly once w
     engine = await start(h);
   let previous;
   for (let i = 0; i < 120; i++) {
-    const next = buildGlasses(
-        product({
-          shape: i % 2 ? "Round" : "Browline",
-          material: i % 3 ? "Acetate" : "Mixed",
-        }),
-        i % 2,
-      ),
+    const next =
+        i < 2
+          ? buildOverlayGlasses(
+              product({
+                id: "server-felix",
+                slug: "the-felix",
+                shape: "Browline",
+                material: "Mixed",
+                colors: ["Chestnut", "Ash"],
+                swatches: [{ hex: "#76442b" }, { hex: "#817b73" }],
+              }),
+              i,
+            )
+          : buildGlasses(
+              product({
+                shape: i % 2 ? "Round" : "Browline",
+                material: i % 3 ? "Acetate" : "Mixed",
+              }),
+              i % 2,
+            ),
       counts = resources(next).map((resource) => {
         const count = { n: 0 };
         resource.addEventListener("dispose", () => count.n++);

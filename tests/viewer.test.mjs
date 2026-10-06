@@ -1,5 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -61,6 +62,18 @@ const product = (overrides = {}) => ({
   swatches: [{ hex: "#202021" }, { hex: "#57575b" }],
   ...overrides,
 });
+const felix = (overrides = {}) =>
+  product({
+    id: "server-felix",
+    slug: "the-felix",
+    name: "The Felix",
+    shape: "Browline",
+    material: "Mixed",
+    dimensions: "51 · 20 · 145",
+    colors: ["Chestnut", "Ash"],
+    swatches: [{ hex: "#76442b" }, { hex: "#817b73" }],
+    ...overrides,
+  });
 const resources = (object) => {
   const found = new Set();
   object.traverse((node) => {
@@ -68,8 +81,12 @@ const resources = (object) => {
       found.add(node.geometry);
       for (const material of Array.isArray(node.material)
         ? node.material
-        : [node.material])
+        : [node.material]) {
         found.add(material);
+        Object.values(material).forEach((value) => {
+          if (value instanceof THREE.Texture) found.add(value);
+        });
+      }
     }
   });
   return [...found];
@@ -261,43 +278,159 @@ test("The Ellis uses the reference reconstruction in the viewer and the camera o
   );
   [model, graphite, overlay, generated].forEach(disposeObject);
 });
+test("The Felix preserves the supplied browline geometry, textured acetate, gold wires and pads", () => {
+  const model = buildDisplayGlasses(felix(), 0),
+    overlay = buildOverlayGlasses(felix(), 0),
+    ash = buildDisplayGlasses(felix(), 1);
+  const bounds = new THREE.Box3()
+    .setFromObject(model)
+    .getSize(new THREE.Vector3());
+  // Supplied VALIDATION.json bounds in metres, converted to the application's cm contract.
+  [15.22758566439152, 5.0834884867072105, 14.013223704770209].forEach(
+    (expected, axis) =>
+      assert.ok(Math.abs(bounds.getComponent(axis) - expected) < 0.01),
+  );
+  let meshes = 0,
+    triangles = 0,
+    textured = 0;
+  model.traverse((node) => {
+    if (node.isMesh) {
+      meshes++;
+      triangles +=
+        (node.geometry.index?.count ??
+          node.geometry.attributes.position.count) / 3;
+      if (node.material.map) {
+        textured++;
+        assert.ok(node.geometry.attributes.uv);
+      }
+      for (const value of node.geometry.attributes.position.array)
+        assert.ok(Number.isFinite(value));
+    }
+  });
+  assert.equal(meshes, 21);
+  assert.equal(triangles, 55642);
+  assert.equal(textured, 4);
+  for (const suffix of ["L", "R"]) {
+    for (const part of [
+      "brow_",
+      "gold_eyewire_",
+      "lens_",
+      "temple_",
+      "nose_pad_",
+      "nose_post_",
+      "pad_mount_",
+      "front_rivet_",
+      "temple_rivet_",
+    ])
+      assert.ok(model.getObjectByName(part + suffix), part + suffix);
+    assert.equal(
+      model
+        .getObjectByName("gold_eyewire_" + suffix)
+        .material.color.getHexString(),
+      "c6a36b",
+    );
+    assert.equal(
+      model.getObjectByName("lens_" + suffix).material.transmission,
+      1,
+    );
+    for (const part of ["lens_", "nose_pad_"]) {
+      const mesh = overlay.getObjectByName(part + suffix);
+      assert.equal(mesh.material.transmission, 0);
+      assert.ok(mesh.material.transparent && mesh.material.opacity < 0.2);
+      assert.equal(mesh.material.depthWrite, false);
+      assert.equal(mesh.renderOrder, 2);
+    }
+  }
+  assert.ok(model.getObjectByName("gold_bridge"));
+  assert.ok(model.getObjectByName("detail.hinge.right"));
+  assert.ok(model.getObjectByName("detail.hinge.left"));
+  const acetate = model.getObjectByName("brow_R").material,
+    map = acetate.map;
+  assert.equal(acetate.clearcoat, 1);
+  assert.equal(acetate.color.getHexString(), "ffffff");
+  assert.equal(map.colorSpace, THREE.SRGBColorSpace);
+  assert.equal(map.wrapS, THREE.RepeatWrapping);
+  assert.equal(map.image.width, 512);
+  assert.equal(
+    createHash("sha256").update(map.image.data).digest("hex"),
+    "3ee9abfae293473448126ca9baf915fdda1dfd146a01f5843b8c74d8a0189449",
+    "pigment bytes match the supplied seed-1836 generator",
+  );
+  assert.equal(ash.getObjectByName("brow_R").material.map, null);
+  assert.equal(
+    ash.getObjectByName("brow_R").material.color.getHexString(),
+    "817b73",
+  );
+  const unknown = buildDisplayGlasses(
+    felix({ colors: ["New color"], swatches: [{ hex: "#737373" }] }),
+    0,
+  );
+  assert.equal(
+    unknown.getObjectByName("brow_R").material.color.getHexString(),
+    "737373",
+  );
+  assert.ok(
+    overlay.getObjectByName("temple_pivot_R").rotation.y < 0 &&
+      overlay.getObjectByName("temple_pivot_L").rotation.y > 0,
+  );
+  assert.equal(model.getObjectByName("temple_pivot_R").rotation.y, 0);
+  assert.equal(overlay.children[0].position.z, -0.003);
+  assert.notEqual(
+    map,
+    overlay.getObjectByName("brow_R").material.map,
+    "each model owns its GPU texture",
+  );
+  const disposals = new Map();
+  for (const resource of resources(model))
+    resource.addEventListener("dispose", () =>
+      disposals.set(resource, (disposals.get(resource) ?? 0) + 1),
+    );
+  disposeObject(model);
+  for (const resource of resources(overlay))
+    assert.ok(!disposals.has(resource));
+  assert.ok(disposals.has(map));
+  for (const count of disposals.values()) assert.equal(count, 1);
+  [overlay, ash, unknown].forEach(disposeObject);
+});
+
 test("front, side, top and perspective views fit the whole model at mobile and desktop sizes", () => {
   for (const [width, height] of [
     [338, 275],
     [600, 570],
     [300, 650],
-  ]) {
-    const h = devices({ width, height }),
-      viewer = h.start(),
-      model = buildDisplayGlasses(product(), 0);
-    viewer.setObject(model);
-    h.flush();
-    const renderer = h.renderers[0];
-    assert.deepEqual(renderer.size, [width, height]);
-    assert.equal(renderer.pixelRatio, 2);
-    assert.equal(renderer.camera.fov, VIEWER_FOV);
-    for (const view of ["perspective", "front", "side", "top"]) {
-      viewer.setView(view);
+  ])
+    for (const frame of [product(), felix()]) {
+      const h = devices({ width, height }),
+        viewer = h.start(),
+        model = buildDisplayGlasses(frame, 0);
+      viewer.setObject(model);
       h.flush();
-      const box = new THREE.Box3().setFromObject(model);
-      for (const x of [box.min.x, box.max.x])
-        for (const y of [box.min.y, box.max.y])
-          for (const z of [box.min.z, box.max.z]) {
-            const point = new THREE.Vector3(x, y, z).project(renderer.camera);
-            assert.ok(
-              Math.abs(point.x) < 1 && Math.abs(point.y) < 1,
-              view + " must fit the model",
-            );
-            assert.ok(point.z > -1 && point.z < 1);
-          }
+      const renderer = h.renderers[0];
+      assert.deepEqual(renderer.size, [width, height]);
+      assert.equal(renderer.pixelRatio, 2);
+      assert.equal(renderer.camera.fov, VIEWER_FOV);
+      for (const view of ["perspective", "front", "side", "top"]) {
+        viewer.setView(view);
+        h.flush();
+        const box = new THREE.Box3().setFromObject(model);
+        for (const x of [box.min.x, box.max.x])
+          for (const y of [box.min.y, box.max.y])
+            for (const z of [box.min.z, box.max.z]) {
+              const point = new THREE.Vector3(x, y, z).project(renderer.camera);
+              assert.ok(
+                Math.abs(point.x) < 1 && Math.abs(point.y) < 1,
+                view + " must fit the model",
+              );
+              assert.ok(point.z > -1 && point.z < 1);
+            }
+      }
+      assert.equal(
+        h.callbacks.size,
+        0,
+        "stationary models do not keep an animation loop running",
+      );
+      viewer.dispose();
     }
-    assert.equal(
-      h.callbacks.size,
-      0,
-      "stationary models do not keep an animation loop running",
-    );
-    viewer.dispose();
-  }
   assert.ok(fitDistance(10, 0.5) > fitDistance(10, 1));
   assert.ok(fitDistance(10, 2) > 10 * VIEWER_FIT_MARGIN);
 });
@@ -529,7 +662,7 @@ test("unsupported WebGL, context loss and render errors keep failures local and 
   }
 });
 
-test("only The Ellis exposes a 3D option; gallery starts with photos and preserves the selected colour", async () => {
+test("Ellis and Felix expose a 3D option; galleries start with photos and preserve selected colour", async () => {
   delete globalThis.window;
   delete globalThis.document;
   const componentOutput = resolve(".sites-runtime/gallery-tests.mjs");
@@ -578,6 +711,16 @@ test("only The Ellis exposes a 3D option; gallery starts with photos and preserv
     );
     assert.ok(!other.includes("View in 3D"));
     assert.ok(other.includes("Frame detail close-up"));
+    const browlineMarkup = renderToStaticMarkup(
+      createElement(ProductGallery, {
+        ...props,
+        product: felix({ image: "/images/frame-07.webp", weight: "21 g" }),
+      }),
+    );
+    assert.ok(browlineMarkup.includes("View in 3D"));
+    assert.ok(browlineMarkup.includes("The Felix in Ash"));
+    assert.ok(!browlineMarkup.includes("<canvas"));
+
     const viewer = renderToStaticMarkup(
       createElement(Product3D, { ...props, onPhotos: () => {} }),
     );

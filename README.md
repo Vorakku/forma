@@ -60,7 +60,7 @@ Prescriptions use the server's optional typed module and are visible only in own
 - `src/lib/types.ts`, `store.ts`: FORMA view models, transient state and limited device persistence.
 - `src/lib/presentation.ts`: local color swatches with neutral fallback for new admin colors.
 - `src/pages`, `src/components`: shopping/account screens and shared UI.
-- `src/tryon`: camera/3D demo; reference assets use product slugs.
+- `src/tryon`: camera/3D demo; Ellis and [Felix browline](doc/feature/3D-BROWLINE-VIEWER.md) use supplied reference reconstructions in both try-on and their lazy product viewers, identified by slug.
 - `tests`, `e2e`: adapter/try-on checks and the shopper journey.
 
 Try-on Phase 3 remains deferred. Its owner-approved plan is global product settings, GLBs in the media module's S3 storage, and the shared admin; see [3D module plan](doc/feature/3D-MODEL-MODULE.md).
