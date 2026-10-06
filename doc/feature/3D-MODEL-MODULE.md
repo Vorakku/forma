@@ -14,7 +14,7 @@ These were settled while discussing the idea. Do not reopen them in Phase 1.
 1. **All per-frame work runs on the device.** Camera, tracking, smoothing and rendering happen in the browser. A server round trip can't fit in a 16–33 ms frame budget. Keeping it local also means camera frames never leave the device (privacy) and processing costs nothing on our side. The 3D engine will **not** be a backend microservice.
 2. **The core is generic; products are plugins.** The engine works in terms of trackers, anchors (`face.noseBridge`, later `hand.leftWrist`), objects and occluders. It must never contain words like "glasses" or "watch". Glasses are one plugin built on it, and watches will be another.
 3. **Stack:** TypeScript, `@mediapipe/tasks-vision` (Face Landmarker for now; Hand Landmarker later for watches), and `three`. No React inside the engine. React is only the page around it.
-4. **Use the backend we already have.** FORMA's server (Hono on a Cloudflare Worker, Prisma + D1) and the admin it shares with Evira are enough. No Fastify/Go/Postgres/Redis/MinIO. When the backend becomes necessary (Phase 3), try-on config goes on `Product`, GLB files go in Cloudflare R2, and model compression runs as a script.
+4. **Use the global commerce server.** FORMA is store #2 on MEGA-PROJECT's Hono/PostgreSQL server. In Phase 3, try-on settings belong on its product, GLB files use the media module's S3-compatible storage (local MinIO), and editing belongs in the shared `admin/`. Model compression remains a script. The owner approved replacing the former Worker/D1/R2 plan in task 11.
 5. **Start inside FORMA, not in a monorepo.** Build the module in `src/tryon/`. Move it into a shared package only when the watch project actually needs to import it.
 6. **Skip until there's a real need:** ONNX Runtime, WebGPU fallback chains, Web Workers for inference (add only if profiling shows jank), analytics, monorepo tooling, microservices.
 
@@ -24,7 +24,7 @@ These were settled while discussing the idea. Do not reopen them in Phase 1.
 |---|---|---|
 | **1. Face demo (now)** | "3D Demo" link in the navbar opens `/try-on`: camera, face tracking, a frame drawn in code from product data, a frame picker | No |
 | 2. Real models | Load GLB files per product (same anchor contract), with a fallback to the code-drawn frame | No (GLBs in `public/` while testing) |
-| 3. Store integration | `Product` try-on fields, GLBs in R2, admin screen for offset/scale, "Try on" button on the product page | Yes (existing server + admin) |
+| 3. Store integration | Global product try-on fields, GLBs in media S3 storage, shared admin screen for offset/scale, "Try on" button on the product page | Yes (global server + shared admin) |
 | 4. Wrist tracking | Hand Landmarker tracker plus a wrist anchor, used by the watch project. This is the point to extract `src/tryon/` into a package | No |
 
 ---
@@ -71,7 +71,7 @@ One face-only implementation. No tracker interface or plugin registry yet: an in
 **MediaPipe setup**
 - `FaceLandmarker.createFromOptions` with `runningMode: 'VIDEO'`, `numFaces: 1`, `outputFacialTransformationMatrixes: true`, `baseOptions.delegate: 'GPU'`. If GPU fails, retry with CPU.
 - Self-host the WASM through Vite instead of a CDN. The package exports the files: import `@mediapipe/tasks-vision/vision_wasm_internal.js?url` and `.../vision_wasm_internal.wasm?url`, then pass `{ wasmLoaderPath, wasmBinaryPath }` as the fileset.
-- Model file: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task` (about 4 MB). Keep it as one constant so it can move to R2 later.
+- Model file: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task` (about 4 MB). Keep it as one constant so it can move to media S3 storage later.
 - Loop: use `video.requestVideoFrameCallback` where available (fall back to `requestAnimationFrame`), call `detectForVideo(video, performance.now())`, update the pose, render. Main thread is fine for Phase 1.
 
 **Mapping the face pose into Three.js**
@@ -140,7 +140,7 @@ Server/schema/admin changes, GLB loading, true-to-size scaling from the iris (se
 
 - **Size accuracy.** MediaPipe's pose assumes an average-sized face, so every face is treated as average and the frames show "average fit". Fix later with the iris: an iris is about 11.7 mm across for almost everyone, so iris size in pixels gives real millimetres per pixel and a true face width.
 - **Camera access needs HTTPS or `localhost`.** Testing on a phone needs an HTTPS tunnel or a local certificate.
-- **Model hosting.** The face model loads from Google's CDN during the demo. Move it to R2 or `public/` before relying on it.
+- **Model hosting.** The face model loads from Google's CDN during the demo. Move it to media S3 storage or `public/` before relying on it.
 - **Performance.** If mid-range phones stutter, first lower detection to every other video frame while still rendering every frame. Only then move inference into a Web Worker (watch for OffscreenCanvas and Safari quirks).
 - **Watches are much harder than glasses.** The Hand Landmarker gives a wrist point, not the wrist's orientation or thickness, and the hand must be in view. Expect a cylinder occluder for the wrist and much more tuning.
 

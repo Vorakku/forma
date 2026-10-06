@@ -4,23 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 4174",
-    "build": "vite build && node scripts/build-worker.mjs",
+    "dev": "vite --host 0.0.0.0 --port 4175",
+    "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "db:generate": "prisma generate",
-    "db:migrate": "node scripts/migrate-local.mjs",
     "test": "node --test tests/*.test.mjs",
-    "postinstall": "prisma generate"
+    "test:e2e": "playwright test"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
-    "@prisma/adapter-d1": "7.10.0",
-    "@prisma/client": "7.10.0",
     "clsx": "2.1.1",
-    "hono": "4.13.12",
     "lucide-react": "1.49.0",
     "radix-ui": "1.6.7",
     "react": "19.3.0",
@@ -33,7 +28,6 @@
     "zustand": "5.0.15"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261001.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "26.6.3",
     "@types/react": "19.3.0",
@@ -41,10 +35,9 @@
     "@types/three": "0.186.0",
     "@vitejs/plugin-react": "6.1.1",
     "esbuild": "0.28.2",
-    "miniflare": "4.20260730.0",
-    "prisma": "7.10.0",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.3.1"
+    "vite": "8.3.1",
+    "@playwright/test": "1.63.0"
   }
 }

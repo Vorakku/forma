@@ -21,14 +21,13 @@
     },
     "types": [
       "vite/client",
-      "@cloudflare/workers-types",
       "node"
     ]
   },
   "include": [
     "src",
-    "server",
     "vite.config.ts",
-    "prisma.config.ts"
+    "playwright.config.ts",
+    "e2e"
   ]
 }
