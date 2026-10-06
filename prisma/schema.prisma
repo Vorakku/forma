@@ -1,0 +1,191 @@
+generator client {
+  provider = "prisma-client"
+  output = "../src/generated/prisma"
+  runtime = "cloudflare"
+}
+datasource db {
+  provider = "sqlite"
+}
+model User {
+  id String @id
+  email String @unique
+  name String
+  firstName String @default("")
+  lastName String @default("")
+  passwordHash String?
+  guest Boolean @default(true)
+  cartVersion Int @default(0)
+  createdAt DateTime @default(now())
+  sessions Session[]
+  addresses Address[]
+  cart CartItem[]
+  wishlist Wishlist[]
+  orders Order[]
+  reviews Review[]
+  comments ReviewComment[]
+  requests SupportRequest[]
+}
+model Session {
+  id String @id
+  userId String
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([userId])
+}
+// sizes = available frame widths, colors = color names; swatches holds each color's {hex,filter} in the same order.
+model Product {
+  id String @id
+  name String
+  category String
+  brand String @default("FORMA")
+  description String
+  price Int
+  originalPrice Int @default(0)
+  stock Int @default(10)
+  sold Int @default(0)
+  rating Float @default(4.7)
+  image String
+  images String @default("[]")
+  sizes String
+  colors String
+  swatches String
+  shape String
+  material String
+  dimensions String
+  weight String
+  rank Int @default(99)
+  tag String @default("")
+  createdAt DateTime @default(now())
+  cart CartItem[]
+  wishlist Wishlist[]
+  reviews Review[]
+  @@index([category])
+}
+model CartItem {
+  id String @id
+  userId String
+  productId String
+  size String
+  color String
+  lens String
+  coating String
+  prescription String @default("")
+  quantity Int
+  createdAt DateTime @default(now())
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  product Product @relation(fields:[productId],references:[id])
+  @@unique([userId,productId,size,color,lens,coating,prescription])
+}
+model Wishlist {
+  userId String
+  productId String
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  product Product @relation(fields:[productId],references:[id])
+  @@id([userId,productId])
+}
+model Address {
+  id String @id
+  userId String
+  firstName String
+  lastName String
+  line1 String
+  line2 String @default("")
+  city String
+  state String @default("")
+  country String
+  postalCode String
+  phone String
+  isDefault Boolean @default(false)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  @@index([userId])
+}
+model Order {
+  id String @id
+  userId String
+  cartVersion Int
+  idempotencyKey String
+  status String
+  items String
+  subtotal Int
+  discount Int
+  shipping Int
+  tax Int
+  total Int
+  address String
+  shippingMethod String
+  paymentMethod String
+  coupon String @default("")
+  returnReason String @default("")
+  events String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  @@unique([userId,idempotencyKey])
+  @@unique([userId,cartVersion])
+  @@index([userId,createdAt])
+}
+model Review {
+  id String @id
+  userId String
+  productId String
+  rating Int
+  title String
+  text String
+  author String
+  sample Boolean @default(false)
+  verified Boolean @default(false)
+  likes Int @default(0)
+  likedBy String @default("[]")
+  createdAt DateTime @default(now())
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  product Product @relation(fields:[productId],references:[id],onDelete:Cascade)
+  comments ReviewComment[]
+  @@unique([userId,productId])
+  @@index([productId,createdAt])
+}
+model ReviewComment {
+  id String @id
+  reviewId String
+  userId String
+  author String
+  text String
+  createdAt DateTime @default(now())
+  review Review @relation(fields:[reviewId],references:[id],onDelete:Cascade)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  @@index([reviewId,createdAt])
+}
+model SupportRequest {
+  id String @id
+  userId String
+  name String
+  email String
+  topic String
+  message String
+  createdAt DateTime @default(now())
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  @@index([userId,createdAt])
+}
+model NewsletterSubscriber {
+  email String @id
+  createdAt DateTime @default(now())
+}
+model RestockRequest {
+  productId String
+  email String
+  createdAt DateTime @default(now())
+  @@id([productId,email])
+}
+model AuthChallenge {
+  id String @id
+  userId String
+  type String
+  value String
+  attempts Int @default(0)
+  expiresAt DateTime
+  @@index([userId,type])
+}
+model OperationGuard {
+  id String @id
+  valid Int
+}

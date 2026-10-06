@@ -1,0 +1,49 @@
+{
+  "label": "after",
+  "status": "Tracking your face. Turn gently to explore the fit.",
+  "exceptions": [],
+  "diagnostics": [
+    [
+      "W1006 05:51:25.894000 2196592 face_landmarker_graph.cc:180] Sets FaceBlendshapesGraph acceleration to xnnpack by default."
+    ],
+    [
+      "W1006 05:51:25.939000 2196592 gl_context.cc:1119] OpenGL error checking is disabled"
+    ],
+    [
+      "INFO: Created TensorFlow Lite XNNPACK delegate for CPU."
+    ],
+    [
+      "THREE.WebGLShadowMap: PCFSoftShadowMap has been removed. Using PCFShadowMap instead."
+    ]
+  ],
+  "stage": {
+    "video": [
+      1280,
+      720
+    ],
+    "canvas": [
+      1280,
+      720
+    ],
+    "mirror": "matrix(-1, 0, 0, 1, 0, 0)",
+    "hiddenSource": true
+  },
+  "cameraColour": {
+    "meanAbsoluteChannelDifference": 0.09905598291848255,
+    "maxChannelDifference": 2,
+    "region": "right 30% outside the frame/shadow at native resolution, 8-bit RGB"
+  },
+  "mobile": {
+    "width": 375,
+    "scrollWidth": 375,
+    "stageAspect": 1.7777777777777777,
+    "videoAspect": 1.7777777777777777,
+    "reducedMotion": true
+  },
+  "release": {
+    "tracks": [
+      "ended"
+    ],
+    "sourceReleased": true
+  }
+}

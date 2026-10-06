@@ -1,0 +1,87 @@
+{
+  "label": "after",
+  "fixture": "cool",
+  "status": "Tracking your face. Turn gently to explore the fit.",
+  "exceptions": [],
+  "diagnostics": [
+    [
+      "W1006 06:13:56.720000 2196592 face_landmarker_graph.cc:180] Sets FaceBlendshapesGraph acceleration to xnnpack by default."
+    ],
+    [
+      "W1006 06:13:56.774000 2196592 gl_context.cc:1119] OpenGL error checking is disabled"
+    ],
+    [
+      "INFO: Created TensorFlow Lite XNNPACK delegate for CPU."
+    ]
+  ],
+  "stage": {
+    "video": [
+      1280,
+      720
+    ],
+    "canvas": [
+      1280,
+      720
+    ],
+    "mirror": "matrix(-1, 0, 0, 1, 0, 0)",
+    "hiddenSource": true
+  },
+  "rendering": {
+    "lightCount": 2,
+    "ambientIntensity": 0.7836915620278676,
+    "ambientColor": [
+      0.8683797097235977,
+      0.9342293108434726,
+      1
+    ],
+    "keyIntensity": 1.5147340236565918,
+    "keyOffset": [
+      -6.992098656003625,
+      11.227513420476551,
+      45
+    ],
+    "shadowOpacity": 0.1389020792499138,
+    "environmentIntensity": 0.34286505838719206,
+    "lenses": [
+      {
+        "opacity": 0.048980722626741725,
+        "clearcoat": 0.34286505838719206
+      }
+    ],
+    "pass": {
+      "blur": 0.6,
+      "grain": 0.02552024414841003,
+      "seed": 4.386400000005961,
+      "contrast": 0.94,
+      "saturation": 0.94,
+      "premultipliedAlpha": true,
+      "layerSize": [
+        1280,
+        720
+      ]
+    }
+  },
+  "cameraColour": {
+    "meanAbsoluteChannelDifference": 0.09002773796640245,
+    "maxChannelDifference": 2,
+    "region": "right 30% outside the frame/shadow at native resolution, 8-bit RGB"
+  },
+  "grain": {
+    "animatedDifference": 0.0551048900462963,
+    "reducedMotionDifference": 0.01771918402777778,
+    "staticSeed": 0
+  },
+  "mobile": {
+    "width": 375,
+    "scrollWidth": 375,
+    "stageAspect": 1.7777777777777777,
+    "videoAspect": 1.7777777777777777,
+    "reducedMotion": true
+  },
+  "release": {
+    "tracks": [
+      "ended"
+    ],
+    "sourceReleased": true
+  }
+}

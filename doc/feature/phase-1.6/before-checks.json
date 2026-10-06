@@ -1,0 +1,28 @@
+{
+  "label": "before",
+  "status": "Tracking your face. Turn gently to explore the fit.",
+  "exceptions": [],
+  "diagnostics": [
+    [
+      "W1006 06:03:38.390000 2196592 face_landmarker_graph.cc:180] Sets FaceBlendshapesGraph acceleration to xnnpack by default."
+    ],
+    [
+      "W1006 06:03:38.432999 2196592 gl_context.cc:1119] OpenGL error checking is disabled"
+    ],
+    [
+      "INFO: Created TensorFlow Lite XNNPACK delegate for CPU."
+    ]
+  ],
+  "stage": {
+    "video": [
+      1280,
+      720
+    ],
+    "canvas": [
+      1280,
+      720
+    ],
+    "mirror": "matrix(-1, 0, 0, 1, 0, 0)",
+    "hiddenSource": true
+  }
+}

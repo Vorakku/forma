@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.sites-runtime/
+.sites-data/
+.wrangler/
+playwright-report/
+test-results/
+.npm-cache/
+.sites-publish/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

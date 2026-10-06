@@ -1,0 +1,33 @@
+{
+  "errors": [],
+  "snapshot": {
+    "count": 11,
+    "triangles": 46724,
+    "bad": 0,
+    "pivots": [
+      0,
+      0
+    ]
+  },
+  "wire": true,
+  "adjusted": true,
+  "dialog": true,
+  "mobileOverflow": false,
+  "glbBytes": 875592,
+  "glbRoundTrip": {
+    "header": "glTF",
+    "version": 2,
+    "meshes": 11,
+    "triangles": 46724,
+    "boundsMeters": [
+      0.15171885123848916,
+      0.043835438787937164,
+      0.13832447498962283
+    ]
+  },
+  "holeContainment": {
+    "leftOutside": 0,
+    "rightOutside": 0
+  },
+  "pdfPages": 10
+}

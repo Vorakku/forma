@@ -1,0 +1,87 @@
+{
+  "label": "after",
+  "fixture": "dim",
+  "status": "Tracking your face. Turn gently to explore the fit.",
+  "exceptions": [],
+  "diagnostics": [
+    [
+      "W1006 06:12:51.856999 2196592 face_landmarker_graph.cc:180] Sets FaceBlendshapesGraph acceleration to xnnpack by default."
+    ],
+    [
+      "W1006 06:12:51.916000 2196592 gl_context.cc:1119] OpenGL error checking is disabled"
+    ],
+    [
+      "INFO: Created TensorFlow Lite XNNPACK delegate for CPU."
+    ]
+  ],
+  "stage": {
+    "video": [
+      1280,
+      720
+    ],
+    "canvas": [
+      1280,
+      720
+    ],
+    "mirror": "matrix(-1, 0, 0, 1, 0, 0)",
+    "hiddenSource": true
+  },
+  "rendering": {
+    "lightCount": 2,
+    "ambientIntensity": 0.2,
+    "ambientColor": [
+      1,
+      0.9104766955590959,
+      0.8426941171057927
+    ],
+    "keyIntensity": 1.0499999999999998,
+    "keyOffset": [
+      -7.075352164953923,
+      11.181994876261179,
+      45
+    ],
+    "shadowOpacity": 0.1402907404991402,
+    "environmentIntensity": 0.0875,
+    "lenses": [
+      {
+        "opacity": 0.02,
+        "clearcoat": 0.0875
+      }
+    ],
+    "pass": {
+      "blur": 0.6,
+      "grain": 0.07500000000000001,
+      "seed": 4.28510000000894,
+      "contrast": 0.94,
+      "saturation": 0.94,
+      "premultipliedAlpha": true,
+      "layerSize": [
+        1280,
+        720
+      ]
+    }
+  },
+  "cameraColour": {
+    "meanAbsoluteChannelDifference": 0.06009852096678269,
+    "maxChannelDifference": 2,
+    "region": "right 30% outside the frame/shadow at native resolution, 8-bit RGB"
+  },
+  "grain": {
+    "animatedDifference": 0.1378888165509259,
+    "reducedMotionDifference": 0.005745081018518518,
+    "staticSeed": 0
+  },
+  "mobile": {
+    "width": 375,
+    "scrollWidth": 375,
+    "stageAspect": 1.7777777777777777,
+    "videoAspect": 1.7777777777777777,
+    "reducedMotion": true
+  },
+  "release": {
+    "tracks": [
+      "ended"
+    ],
+    "sourceReleased": true
+  }
+}

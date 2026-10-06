@@ -1,0 +1,5 @@
+export class ApiError extends Error{constructor(message:string,public status:number){super(message)}}
+export async function api<T=any>(path:string,method='GET',body?:unknown):Promise<T>{
+ const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),20000);
+ try{const r=await fetch('/api'+path,{method,credentials:'same-origin',headers:body instanceof File?{'Content-Type':body.type}:body!==undefined?{'Content-Type':'application/json'}:{},body:body instanceof File?body:body!==undefined?JSON.stringify(body):undefined,signal:controller.signal});const content:any=await r.json().catch(()=>({error:'The server returned an unexpected response.'}));if(!r.ok)throw new ApiError(content.error??'This operation could not be completed.',r.status);return content;}catch(e){if(e instanceof ApiError)throw e;if(e instanceof DOMException&&e.name==='AbortError')throw new Error('The request timed out. Check your connection and try again.');throw new Error('Unable to connect. Your input is still here; please try again.')}finally{clearTimeout(timeout)}
+}
