@@ -2,9 +2,6 @@ import { fitDistance } from "./studio";
 
 export const PHI_MIN = 0.02;
 export const PHI_MAX = Math.PI - PHI_MIN;
-export const HOLD_DURATION = 0.4;
-export const MOVE_DURATION = 1;
-export const SCROLL_LENGTH_VH = 600;
 
 // Degrees; keep the ordered pose table easy to retune or extend.
 // prettier-ignore
@@ -52,22 +49,4 @@ export function resolveScrollPoses(
           : radius * angle.distance,
     };
   });
-}
-
-export function holdStart(index: number) {
-  return index * (HOLD_DURATION + MOVE_DURATION);
-}
-
-export const TIMELINE_DURATION =
-  holdStart(SCROLL_ANGLES.length - 1) + HOLD_DURATION;
-
-// Cut at the midpoint of a move for reduced motion; holds keep the same timing.
-export function stillPoseIndex(time: number) {
-  return Math.min(
-    SCROLL_ANGLES.length - 1,
-    Math.max(
-      0,
-      Math.floor((time + MOVE_DURATION / 2) / (HOLD_DURATION + MOVE_DURATION)),
-    ),
-  );
 }

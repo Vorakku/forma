@@ -53,10 +53,7 @@ const {
   resolveScrollPoses,
   populateScrollTimeline,
   clampPhi,
-  holdStart,
-  stillPoseIndex,
-  HOLD_DURATION,
-  TIMELINE_DURATION,
+  SCROLL_ANGLES,
 } = await import(pathToFileURL(output));
 after(() => rm(output, { force: true }));
 const product = (overrides = {}) => ({
@@ -804,7 +801,7 @@ test("scroll poses match product presets and the centred hinge focus", () => {
   viewer.dispose();
 });
 
-test("one GSAP orbit timeline holds every pose at both boundaries and never crosses a pole", async () => {
+test("one linear GSAP orbit timeline matches integer angles and never crosses a pole", async () => {
   const { gsap } = await import("gsap");
   const poses = resolveScrollPoses(10, 1, () => ({ x: 6, y: 1, z: 5 }));
   const pose = { ...poses[0] };
@@ -813,20 +810,28 @@ test("one GSAP orbit timeline holds every pose at both boundaries and never cros
     pose,
     poses,
   );
-  assert.ok(Math.abs(timeline.duration() - TIMELINE_DURATION) < 1e-9);
+  assert.ok(Math.abs(timeline.duration() - (poses.length - 1)) < 1e-9);
   // GSAP rounds numeric tween values to six decimal places.
   const equals = (expected) =>
     Object.entries(expected).forEach(([key, value]) =>
       assert.ok(Math.abs(pose[key] - value) < 1e-6, key),
     );
   for (let index = 0; index < poses.length; index++) {
-    for (const time of [holdStart(index), holdStart(index) + HOLD_DURATION]) {
-      timeline.time(time, false);
-      equals(poses[index]);
+    timeline.time(index, false);
+    equals(poses[index]);
+    if (index < poses.length - 1) {
+      timeline.time(index + 0.5, false);
+      equals(
+        Object.fromEntries(
+          Object.keys(poses[index]).map((key) => [
+            key,
+            (poses[index][key] + poses[index + 1][key]) / 2,
+          ]),
+        ),
+      );
     }
-    assert.equal(stillPoseIndex(holdStart(index) + HOLD_DURATION / 2), index);
   }
-  for (let time = TIMELINE_DURATION; time >= 0; time -= 0.01) {
+  for (let time = poses.length - 1; time >= 0; time -= 0.01) {
     timeline.time(time, false);
     assert.ok(pose.phi >= 0.02 - 1e-6 && pose.phi <= Math.PI - 0.02);
     assert.ok(
@@ -837,6 +842,27 @@ test("one GSAP orbit timeline holds every pose at both boundaries and never cros
   // An invalid future pose is clamped in both table resolution and camera placement.
   assert.equal(clampPhi(-10), 0.02);
   assert.equal(clampPhi(10), Math.PI - 0.02);
+  timeline.kill();
+});
+
+test("a sixth table angle extends the integer timeline without changing the driver", async () => {
+  const { gsap } = await import("gsap");
+  const table = [
+    ...SCROLL_ANGLES,
+    { ...SCROLL_ANGLES[0], name: "Extra angle" },
+  ];
+  const resolved = resolveScrollPoses(10, 1, () => ({ x: 6, y: 1, z: 5 }));
+  const poses = table.map((_, index) => resolved[index] ?? resolved[0]);
+  const pose = { ...poses[0] };
+  const timeline = populateScrollTimeline(
+    gsap.timeline({ paused: true }),
+    pose,
+    poses,
+  );
+  assert.equal(timeline.duration(), table.length - 1);
+  timeline.time(table.length - 1, false);
+  for (const [key, value] of Object.entries(poses.at(-1)))
+    assert.ok(Math.abs(pose[key] - value) < 1e-6);
   timeline.kill();
 });
 

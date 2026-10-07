@@ -87,6 +87,20 @@ test("3D libraries stay lazy; the product viewer never loads face tracking or WA
     ),
     "scroll uses no OrbitControls",
   );
+  assert.ok(
+    [...demo].some((chunk) =>
+      Object.keys(chunk.modules).some((id) => id.endsWith("/gsap/Observer.js")),
+    ),
+    "demo uses Observer",
+  );
+  assert.ok(
+    !chunks.some((chunk) =>
+      Object.keys(chunk.modules).some((id) =>
+        id.includes("/gsap/ScrollTrigger"),
+      ),
+    ),
+    "no ScrollTrigger in any bundle",
+  );
   assert.ok(!core.has(scroll));
   assert.ok(all.has(scroll));
   assert.ok(!core.has(viewer));

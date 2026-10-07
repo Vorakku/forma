@@ -1,34 +1,39 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { Observer } from "gsap/Observer";
 import { useGSAP } from "@gsap/react";
-import { useProduct, useProductList } from "@/lib/store";
+import { useApp, useProduct, useProductList } from "@/lib/store";
 import { buildDisplayGlasses } from "@/tryon/glasses";
 import { createScrollViewer } from "@/tryon/scroll-viewer";
 import { populateScrollTimeline } from "@/tryon/scroll-timeline";
+import { resolveScrollPoses, SCROLL_ANGLES } from "@/tryon/scroll-poses";
 import {
-  resolveScrollPoses,
-  HOLD_DURATION,
-  SCROLL_LENGTH_VH,
-  TIMELINE_DURATION,
-  stillPoseIndex,
-} from "@/tryon/scroll-poses";
+  createScrollSteps,
+  acceptsStepInput,
+  stepDuration,
+  GESTURE_IDLE_MS,
+  type StepCommand,
+  type StepEvent,
+} from "@/tryon/scroll-steps";
 import "./v2-demo.css";
 
-gsap.registerPlugin(ScrollTrigger, useGSAP);
+gsap.registerPlugin(Observer, useGSAP);
 
-// The header fades out as the first scroll starts the animation and returns
-// at the end of the final hold, after the last angle settles.
-const HEADER_FADE = (HOLD_DURATION * 0.4) / TIMELINE_DURATION;
+function headerOpacity(time: number, last: number) {
+  return gsap.utils.clamp(
+    0,
+    1,
+    Math.max(1 - time / 0.4, 1 - (last - time) / 0.4),
+  );
+}
 
-function headerOpacity(scroll: number, pin: ScrollTrigger) {
-  const fade = (pin.end - pin.start) * HEADER_FADE;
-  // The page can end a pixel or two before the pin; finish the return there.
-  const returnTo = Math.min(pin.end, ScrollTrigger.maxScroll(window));
-  const leaving = 1 - (scroll - pin.start) / fade;
-  const returning = 1 - (returnTo - scroll) / fade;
-  return gsap.utils.clamp(0, 1, Math.max(leaving, returning));
+function blocked(target: EventTarget | null) {
+  return (
+    useApp.getState().panel !== null ||
+    (target instanceof Element &&
+      !!target.closest('[role="dialog"], dialog, .drawer'))
+  );
 }
 
 export function V2Demo() {
@@ -38,6 +43,7 @@ export function V2Demo() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
+  const [angle, setAngle] = useState(0);
 
   useGSAP(
     () => {
@@ -59,8 +65,43 @@ export function V2Demo() {
         const poses = () =>
           resolveScrollPoses(viewer!.radius, viewer!.aspect, viewer!.getAnchor);
         const header = document.querySelector<HTMLElement>(".site-header");
-        const range = () =>
-          `+=${(window.innerHeight * SCROLL_LENGTH_VH) / 100}`;
+        const element = stage.current!;
+        const last = SCROLL_ANGLES.length - 1;
+        const steps = createScrollSteps(
+          SCROLL_ANGLES.length,
+          () => window.innerHeight,
+        );
+        const pose = { ...poses()[0] };
+        let stepTween: gsap.core.Tween | undefined;
+        let timeline: gsap.core.Timeline;
+        const update = () => {
+          viewer!.setPose(pose);
+          if (header)
+            gsap.set(header, {
+              autoAlpha: headerOpacity(timeline.time(), last),
+            });
+        };
+        timeline = gsap.timeline({ paused: true, onUpdate: update });
+        populateScrollTimeline(timeline, pose, poses());
+        update();
+        const land = (index: number) => {
+          element.dataset.angle = String(index);
+          element.removeAttribute("data-moving");
+          setAngle(index);
+          steps.handle({
+            type: "landed",
+            angle: index,
+            at: performance.now(),
+            time: timeline.time(),
+          });
+        };
+        land(0);
+        refreshPose = () => {
+          const time = timeline.time();
+          populateScrollTimeline(timeline, pose, poses());
+          timeline.time(time, true);
+          update();
+        };
 
         media.add(
           {
@@ -68,82 +109,156 @@ export function V2Demo() {
             normal: "(prefers-reduced-motion: no-preference)",
           },
           (context) => {
-            let pin: ScrollTrigger;
-            if (context.conditions?.reduced) {
-              const update = (progress: number) =>
-                viewer!.setPose(
-                  poses()[stillPoseIndex(progress * TIMELINE_DURATION)],
-                );
-              pin = ScrollTrigger.create({
-                trigger: stage.current,
-                start: "top top",
-                end: range,
-                pin: true,
-                onUpdate: (self) => update(self.progress),
-                onRefresh: (self) => update(self.progress),
-              });
-              refreshPose = () => update(pin.progress);
-              update(pin.progress);
-            } else {
-              const pose = { ...poses()[0] };
-              const timeline = gsap.timeline({
-                paused: true,
-                onUpdate: () => viewer!.setPose(pose),
-              });
-              populateScrollTimeline(timeline, pose, poses());
-              viewer!.setPose(pose);
-              refreshPose = () => {
-                const progress = timeline.progress();
-                populateScrollTimeline(timeline, pose, poses());
-                timeline.progress(progress, true);
-                viewer!.setPose(pose);
-              };
-              pin = ScrollTrigger.create({
-                trigger: stage.current,
-                start: "top top",
-                end: range,
-                pin: true,
-                scrub: 1,
-                animation: timeline,
-              });
-            }
-            // Created after the pin so its refresh reads the pin's updated range.
-            const fadeHeader = (self: ScrollTrigger) =>
-              header &&
-              gsap.set(header, {
-                autoAlpha: headerOpacity(self.scroll(), pin),
-              });
-            ScrollTrigger.create({
-              start: 0,
-              end: "max",
-              onUpdate: fadeHeader,
-              onRefresh: fadeHeader,
+            gsap.set(document.documentElement, { overflow: "hidden" });
+            gsap.set(document.body, { overflow: "hidden" });
+            gsap.set(element, { touchAction: "none" });
+            const execute = (commands: StepCommand[]) => {
+              for (const command of commands) {
+                stepTween?.kill();
+                stepTween = undefined;
+                if (command.type === "scrubTo") {
+                  element.dataset.moving = "true";
+                  timeline.time(command.time, false);
+                } else {
+                  if (command.type === "cutTo") {
+                    timeline.time(command.angle, false);
+                    update();
+                    land(command.angle);
+                  } else {
+                    element.dataset.moving = "true";
+                    stepTween = gsap.to(timeline, {
+                      time: command.angle,
+                      duration: stepDuration(timeline.time(), command.angle),
+                      ease: command.ease,
+                      onComplete: () => {
+                        stepTween = undefined;
+                        land(command.angle);
+                      },
+                    });
+                    if (document.hidden) stepTween.pause();
+                  }
+                }
+              }
+            };
+            const send = (event: StepEvent) => execute(steps.handle(event));
+            execute(
+              steps.setReduced(!!context.conditions?.reduced, timeline.time()),
+            );
+            // Normalised deltas come from Observer; raw flags are checked before cancellation.
+            const wheel = Observer.create({
+              target: window,
+              type: "wheel",
+              debounce: false,
+              preventDefault: true,
+              ignoreCheck: (event) => {
+                const input = event as WheelEvent;
+                return !acceptsStepInput({
+                  type: "wheel",
+                  at: input.timeStamp,
+                  time: timeline.time(),
+                  deltaY: input.deltaY,
+                  deltaX: input.deltaX,
+                  ctrlKey: input.ctrlKey,
+                  blocked: blocked(event.target),
+                });
+              },
+              onWheel: (self) => {
+                send({
+                  type: "wheel",
+                  deltaY: self.deltaY,
+                  at: self.event.timeStamp,
+                  time: timeline.time(),
+                });
+              },
+              onStopDelay: GESTURE_IDLE_MS / 1000,
+              onStop: () => {
+                send({
+                  type: "idle",
+                  at: performance.now(),
+                  time: timeline.time(),
+                });
+              },
             });
+            const touch = Observer.create({
+              target: element,
+              type: "touch",
+              debounce: false,
+              preventDefault: true,
+              ignoreCheck: (event) =>
+                blocked(event.target) ||
+                ("touches" in event &&
+                  (event as TouchEvent).touches.length > 1),
+              onPress: () => {
+                stepTween?.pause();
+                send({
+                  type: "touchStart",
+                  at: performance.now(),
+                  time: timeline.time(),
+                });
+              },
+              onChangeY: (self) => {
+                if (!self.isPressed) return;
+                send({
+                  type: "touchMove",
+                  deltaY: -self.deltaY,
+                  at: self.event.timeStamp,
+                  time: timeline.time(),
+                });
+              },
+              onRelease: (self) => {
+                send({
+                  type: "touchEnd",
+                  cancelled: self.event.type.endsWith("cancel"),
+                  at: performance.now(),
+                  time: timeline.time(),
+                });
+                stepTween?.resume();
+              },
+            });
+            const keydown = (event: KeyboardEvent) => {
+              const focus = document.activeElement;
+              const input: StepEvent = {
+                type: "key",
+                key: event.key,
+                shiftKey: event.shiftKey,
+                at: event.timeStamp,
+                time: timeline.time(),
+                blocked: blocked(event.target),
+                editable: !!focus?.closest(
+                  'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
+                ),
+                interactive: !!focus?.closest(
+                  'button, a, [role="button"], [role="link"]',
+                ),
+              };
+              if (!acceptsStepInput(input)) return;
+              event.preventDefault();
+              send(input);
+            };
+            const visibility = () => {
+              if (document.hidden) stepTween?.pause();
+              else stepTween?.resume();
+            };
+            document.addEventListener("keydown", keydown);
+            document.addEventListener("visibilitychange", visibility);
             return () => {
-              refreshPose = () => {};
-              if (header)
-                gsap.set(header, { clearProps: "opacity,visibility" });
+              wheel.kill();
+              touch.kill();
+              stepTween?.kill();
+              stepTween = undefined;
+              document.removeEventListener("keydown", keydown);
+              document.removeEventListener("visibilitychange", visibility);
             };
           },
         );
-        const visibility = () => {
-          // Freeze the scrub tween while hidden; resume toward the current scroll on return.
-          const trigger = ScrollTrigger.getAll().find(
-            (item) => item.trigger === stage.current,
-          );
-          if (document.hidden) {
-            trigger?.getTween()?.pause();
-          } else {
-            trigger?.update();
-            trigger?.getTween()?.play();
-          }
-        };
-        document.addEventListener("visibilitychange", visibility);
         setReady(true);
         return () => {
           live = false;
-          document.removeEventListener("visibilitychange", visibility);
           media.revert();
+          refreshPose = () => {};
+          timeline.kill();
+          element.removeAttribute("data-moving");
+          element.removeAttribute("data-angle");
           viewer?.dispose();
         };
       } catch {
@@ -172,9 +287,14 @@ export function V2Demo() {
         <canvas
           ref={canvas}
           role="img"
-          aria-label="3D view of The Ellis in Ink black, shown from five angles as you scroll"
+          aria-label={`3D view of The Ellis in Ink black, shown from ${SCROLL_ANGLES.length} angles as you scroll`}
         />
       )}
+      <span className="v2-demo-announcement" aria-live="polite">
+        {ready &&
+          !unavailable &&
+          `Angle ${angle + 1} of ${SCROLL_ANGLES.length}: ${SCROLL_ANGLES[angle].name}`}
+      </span>
       {(unavailable || empty || !ready) && (
         <div className="v2-demo-state" role="status">
           {unavailable ? (
