@@ -15,7 +15,7 @@ const output = resolve(".sites-runtime/viewer-tests.mjs");
 await build({
   stdin: {
     contents:
-      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';",
+      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';",
     resolveDir: resolve("src/tryon"),
   },
   outfile: output,
@@ -56,8 +56,9 @@ const {
   SCROLL_ANGLES,
   createExploder,
   EXPLODE_MM,
-  EXPLODE_SHARE,
-  BLUEPRINT_SHARE,
+  buildMotionBudget,
+  interpolateOrbit,
+  pathProgress,
   createBlueprint,
   ellisBlueprintCurves,
   ELLIS_FRONT_DEPTH,
@@ -850,14 +851,18 @@ test("one linear GSAP orbit timeline matches integer angles and never crosses a 
       poses[index].blueprint === poses[index + 1].blueprint
     ) {
       timeline.time(index + 0.5, false);
-      equals(
-        Object.fromEntries(
-          Object.keys(poses[index]).map((key) => [
-            key,
-            (poses[index][key] + poses[index + 1][key]) / 2,
-          ]),
-        ),
+      const phase = buildMotionBudget(poses, [], 1, 1).steps[index].phases.find(
+        (p) => p.kind === "camera",
       );
+      equals({
+        ...interpolateOrbit(
+          poses[index],
+          poses[index + 1],
+          pathProgress(phase.move, 0.5),
+        ),
+        explode: poses[index].explode,
+        blueprint: poses[index].blueprint,
+      });
     }
   }
   for (let time = poses.length - 1; time >= 0; time -= 0.01) {
@@ -994,86 +999,72 @@ test("frames with a missing reference assembly make explode a silent no-op", () 
   disposeObject(model);
 });
 
-test("split timeline parks the camera whenever exploded or blueprint, in both directions and on resize rebuild", async () => {
+test("budget timeline parks the camera whenever exploded or blueprint in both directions and after resize", async () => {
   const { gsap } = await import("gsap");
   const poses = resolveScrollPoses(10, 1, () => ({ x: 6, y: 1, z: 5 }), 15);
-  const pose = { ...poses[0] };
+  const pose = { ...poses[0] },
+    budget = buildMotionBudget(poses, [], 1, 1);
   const timeline = populateScrollTimeline(
     gsap.timeline({ paused: true }),
     pose,
     poses,
+    budget,
   );
-  const equalsOrbit = (expected) => {
-    for (const key of Object.keys(expected).filter(
-      (key) => key !== "explode" && key !== "blueprint",
-    ))
-      assert.ok(Math.abs(pose[key] - expected[key]) < 1e-6, key);
-  };
-  for (const direction of [1, -1]) {
+  const equalsOrbit = (expected) =>
+    Object.keys(expected)
+      .filter((k) => k !== "explode" && k !== "blueprint")
+      .forEach((k) => assert.ok(Math.abs(pose[k] - expected[k]) < 1e-6, k));
+  for (const direction of [1, -1])
     for (let index = 0; index <= 400; index++) {
       const time = direction === 1 ? index / 100 : (400 - index) / 100;
       timeline.time(time, false);
       if (pose.explode > 0) equalsOrbit(poses[1]);
       if (pose.blueprint > 0) equalsOrbit(poses[2]);
       assert.ok(!(pose.explode > 0 && pose.blueprint > 0));
-      if (time <= 1 - EXPLODE_SHARE || time >= 1 + EXPLODE_SHARE)
-        assert.equal(pose.explode, 0);
     }
-  }
-  for (const [time, amount] of [
-    [0, 0],
-    [1, 1],
-    [2, 0],
-    [0.8, 0.5],
-    [1.2, 0.5],
-  ]) {
-    timeline.time(time, false);
-    assert.ok(Math.abs(pose.explode - amount) < 1e-6);
-  }
-  // These samples distinguish camera-then-explode from assemble-then-camera.
-  timeline.time(0.3, false);
-  assert.equal(pose.explode, 0);
-  assert.notEqual(pose.theta, poses[1].theta);
-  timeline.time(0.8, false);
-  equalsOrbit(poses[1]);
-  assert.equal(pose.explode, 0.5);
-  timeline.time(1.2, false);
-  equalsOrbit(poses[1]);
-  assert.equal(pose.explode, 0.5);
-  for (const [time, amount] of [
-    [1, 0],
-    [1.4, 0],
-    [1.75, 0],
-    [1.875, 0.5],
-    [2, 1],
-    [2.125, 0.5],
-    [2.25, 0],
-    [3, 0],
-  ]) {
-    timeline.time(time, false);
-    assert.ok(Math.abs(pose.blueprint - amount) < 1e-6);
-  }
-  timeline.time(1.575, false);
-  assert.equal(pose.explode, 0);
-  assert.equal(pose.blueprint, 0);
-  assert.notEqual(pose.theta, poses[1].theta);
-  assert.notEqual(pose.phi, poses[2].phi);
-  timeline.time(1.875, false);
-  equalsOrbit(poses[2]);
-  assert.equal(pose.explode, 0);
-  timeline.time(2.125, false);
-  equalsOrbit(poses[2]);
-  timeline.time(1.7, false);
-  assert.equal(pose.explode, 0);
-  assert.notEqual(pose.theta, poses[1].theta);
-  timeline.time(0.8, false);
+  assert.deepEqual(
+    budget.steps.map((step) => step.phases.map((p) => p.kind)),
+    [
+      ["camera", "explode"],
+      ["explode", "camera", "blueprint"],
+      ["blueprint", "camera"],
+      ["camera"],
+    ],
+  );
+  for (const step of budget.steps)
+    for (const phase of step.phases) {
+      timeline.time((phase.start + phase.end) / 2, false);
+      if (phase.kind === "explode") {
+        assert.equal(pose.explode, 0.5);
+        equalsOrbit(poses[1]);
+      }
+      if (phase.kind === "blueprint") {
+        assert.equal(pose.blueprint, 0.5);
+        equalsOrbit(poses[2]);
+      }
+      if (phase.kind === "camera") {
+        assert.equal(pose.explode, 0);
+        assert.equal(pose.blueprint, 0);
+      }
+      assert.ok(
+        Math.abs(phase.end - phase.start - phase.seconds / step.seconds) <
+          1e-12,
+      );
+    }
   const rebuilt = resolveScrollPoses(
     10,
     375 / 812,
     () => ({ x: 6, y: 1, z: 5 }),
     15,
   );
-  populateScrollTimeline(timeline, pose, rebuilt).time(0.8, true);
+  const newBudget = buildMotionBudget(rebuilt, [], 375, 812);
+  const explodePhase = newBudget.steps[0].phases.find(
+    (p) => p.kind === "explode",
+  );
+  populateScrollTimeline(timeline, pose, rebuilt, newBudget).time(
+    (explodePhase.start + explodePhase.end) / 2,
+    false,
+  );
   equalsOrbit(rebuilt[1]);
   assert.equal(pose.explode, 0.5);
   timeline.kill();
@@ -1466,8 +1457,19 @@ test("mix zero retains studio materials and render state, partial/full blueprint
     );
     assert.equal(renderer.getRenderTarget(), null);
   }
-  assert.equal(renderer.renders - initialRenders, 8); // Two three-pass fades and two direct endpoint renders.
-  const renders = renderer.renders;
+  assert.equal(renderer.renders - initialRenders, 6); // First fade builds both images; the next only composites.
+  viewer.setPose({ ...poses[2], blueprint: 0.5 });
+  let renders = renderer.renders;
+  viewer.setBlueprintTokens(tokensFor("blue"));
+  assert.equal(renderer.renders - renders, 3); // Theme invalidates both cached images.
+  renders = renderer.renders;
+  viewer.setPose({ ...poses[2], blueprint: 0.6 });
+  assert.equal(renderer.renders - renders, 1);
+  renders = renderer.renders;
+  h.canvas.clientWidth = 375;
+  h.resize();
+  assert.equal(renderer.renders - renders, 3); // New drawing-buffer size invalidates.
+  renders = renderer.renders;
   h.doc.hidden = true;
   viewer.setPose({ ...poses[2], blueprint: 0.5 });
   viewer.setBlueprintTokens(tokensFor("blue"));
@@ -1476,6 +1478,41 @@ test("mix zero retains studio materials and render state, partial/full blueprint
   viewer.dispose();
   assert.ok(renderer.disposed);
   assert.equal(h.callbacks.size, 0);
+});
+
+test("scroll-only shadow caching refreshes on assembly changes and keeps product viewer defaults", () => {
+  const h = devices();
+  const viewer = createScrollViewer({
+    canvas: h.canvas,
+    onError: () => assert.fail("unexpected failure"),
+  });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const poses = resolveScrollPoses(
+    viewer.radius,
+    viewer.aspect,
+    viewer.getAnchor,
+    viewer.explodedRadius,
+  );
+  viewer.setPose(poses[0]);
+  const renderer = h.renderers[0];
+  assert.equal(renderer.shadowMap.autoUpdate, false);
+  assert.equal(renderer.shadowMap.needsUpdate, true);
+  viewer.setPose({ ...poses[1], explode: 0 });
+  assert.equal(renderer.shadowMap.needsUpdate, false);
+  viewer.setPose({ ...poses[1], explode: 0.5 });
+  assert.equal(renderer.shadowMap.needsUpdate, true);
+  viewer.setPose({ ...poses[1], explode: 0.5 });
+  assert.equal(renderer.shadowMap.needsUpdate, false);
+  viewer.setPose({ ...poses[1], explode: 0 });
+  assert.equal(renderer.shadowMap.needsUpdate, true);
+  viewer.dispose();
+  const productDevices = devices();
+  const productViewer = createObjectViewer({
+    canvas: productDevices.canvas,
+    onError: () => assert.fail("unexpected failure"),
+  });
+  assert.notEqual(productDevices.renderers[0].shadowMap.autoUpdate, false);
+  productViewer.dispose();
 });
 
 test("saved blueprint choice validates values and tolerates reads, getter and writes denied by storage", () => {

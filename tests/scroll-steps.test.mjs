@@ -13,19 +13,19 @@ await build({
   format: "esm",
   platform: "node",
 });
-const {
-  createScrollSteps,
-  stepDuration,
-  scrollStepWeights,
-  EXPLODE_STEP_WEIGHT,
-  GESTURE_IDLE_MS,
-  STEP_MIN,
-  STEP_MAX,
-} = await import(pathToFileURL(output));
+const { createScrollSteps, stepDuration, GESTURE_IDLE_MS } = await import(
+  pathToFileURL(output)
+);
 after(() => rm(output, { force: true }));
 
 function harness(count = 5, reduced = false, angle = 0) {
-  const controller = createScrollSteps(count, () => 1000, reduced, angle);
+  const controller = createScrollSteps(
+    count,
+    () => 1000,
+    reduced,
+    angle,
+    Array(count - 1).fill(2),
+  );
   let time = angle;
   const send = (type, at, fields = {}) => {
     const commands = controller.handle({ type, at, time, ...fields });
@@ -47,8 +47,8 @@ function harness(count = 5, reduced = false, angle = 0) {
     },
   };
 }
-const animate = (angle, ease = "power2.inOut") => [
-  { type: "animateTo", angle, ease },
+const animate = (angle, jump = false) => [
+  { type: "animateTo", angle, jump: jump === true },
 ];
 
 test("one notch and a burst step only once, even after landing", () => {
@@ -179,10 +179,10 @@ test("all step keys and Home/End work with a sixth angle", () => {
     { key: " ", shiftKey: true },
   ])
     assert.deepEqual(harness(6, false, 3).send("key", 0, fields), animate(2));
-  assert.deepEqual(harness(6).send("key", 0, { key: "End" }), animate(5));
+  assert.deepEqual(harness(6).send("key", 0, { key: "End" }), animate(5, true));
   assert.deepEqual(
     harness(6, false, 5).send("key", 0, { key: "Home" }),
-    animate(0),
+    animate(0, true),
   );
   assert.deepEqual(harness(6, true).send("key", 0, { key: "End" }), [
     { type: "cutTo", angle: 5 },
@@ -193,10 +193,12 @@ test("all step keys and Home/End work with a sixth angle", () => {
   assert.deepEqual(harness(6, false, 4).wheel(100, 0), animate(5));
 });
 
-test("step durations scale with distance and clamp for partial and multi-angle moves", () => {
-  assert.equal(stepDuration(0, 1), 1.1);
-  assert.equal(stepDuration(0.99, 1), STEP_MIN);
-  assert.equal(stepDuration(0, 5), STEP_MAX);
+test("seconds integrate partial/reverse/multi-angle durations without a cap", () => {
+  const seconds = [3.5, 4.5, 8, 7];
+  assert.equal(stepDuration(0, 1, seconds), 3.5);
+  assert.equal(stepDuration(1, 0, seconds), 3.5);
+  assert.ok(Math.abs(stepDuration(0.99, 1, seconds) - 0.035) < 1e-12);
+  assert.equal(stepDuration(0, 4, seconds), 23);
 });
 
 test("reversal before the first animation tick still cancels the destination", () => {
@@ -226,34 +228,15 @@ test("a scrub interrupting a step starts at the current camera time without a ju
   assert.deepEqual(reverse.send("touchEnd", 400), animate(0, "power2.out"));
 });
 
-test("split step weights scale full/partial/reverse durations and scrub distance without changing gesture decisions", () => {
-  const states = [
-    { exploded: false },
-    { exploded: true },
-    { exploded: false },
-    { exploded: false },
-  ];
-  const weights = scrollStepWeights(states);
-  assert.deepEqual(weights, [EXPLODE_STEP_WEIGHT, EXPLODE_STEP_WEIGHT, 1]);
-  assert.ok(Math.abs(stepDuration(0, 1, weights) - 1.54) < 1e-12);
-  assert.ok(Math.abs(stepDuration(2, 1, weights) - 1.54) < 1e-12);
-  assert.ok(Math.abs(stepDuration(0.8, 1.2, weights) - 0.616) < 1e-12);
-  assert.equal(stepDuration(0, 3, weights), STEP_MAX);
-  assert.equal(stepDuration(0.99, 1, weights), STEP_MIN);
+test("budget seconds weight scrub pixels, update live on resize, and preserve gesture decisions", () => {
+  const seconds = [3.5, 4.5, 8, 7];
   for (const [start, delta, expected] of [
-    [0, 70, 0.1],
-    [1, 70, 1.1],
-    [1, -70, 0.9],
-    [2, -70, 1.9],
-    [2, 70, 2.14],
+    [0, 87.5, 0.1],
+    [1, -87.5, 0.9],
+    [1, 112.5, 1.1],
+    [2, -112.5, 1.9],
   ]) {
-    const steps = createScrollSteps(
-      states.length,
-      () => 1000,
-      false,
-      start,
-      weights,
-    );
+    const steps = createScrollSteps(5, () => 1000, false, start, seconds);
     steps.handle({ type: "touchStart", at: 0, time: start });
     const [command] = steps.handle({
       type: "touchMove",
@@ -261,45 +244,22 @@ test("split step weights scale full/partial/reverse durations and scrub distance
       time: start,
       deltaY: delta,
     });
-    assert.equal(command.type, "scrubTo");
     assert.ok(Math.abs(command.time - expected) < 1e-12);
   }
-  const steps = createScrollSteps(states.length, () => 1000, false, 0, weights);
-  assert.deepEqual(
-    steps.handle({ type: "wheel", at: 0, time: 0, deltaY: 100 }),
-    animate(1),
+  const steps = createScrollSteps(5, () => 1000, false, 0, seconds);
+  seconds[0] = 7;
+  steps.handle({ type: "touchStart", at: 0, time: 0 });
+  assert.equal(
+    steps.handle({ type: "touchMove", at: 200, time: 0, deltaY: 175 })[0].time,
+    0.1,
   );
   assert.deepEqual(
-    steps.handle({ type: "wheel", at: 50, time: 0.2, deltaY: 100 }),
+    steps.handle({ type: "wheel", at: 250, time: 0.1, deltaY: 100 }),
     [],
   );
-});
-
-test("three-phase blueprint steps get weight 1.7 in both directions without altering flick classification", () => {
-  const weights = scrollStepWeights([
-    { exploded: false, blueprint: false },
-    { exploded: true, blueprint: false },
-    { exploded: false, blueprint: true },
-    { exploded: false, blueprint: false },
-    { exploded: false, blueprint: false },
-  ]);
-  assert.deepEqual(weights, [1.4, 1.7, 1.4, 1]);
-  assert.ok(Math.abs(stepDuration(1, 2, weights) - 1.87) < 1e-12);
-  assert.equal(stepDuration(2, 1, weights), stepDuration(1, 2, weights));
-  assert.ok(Math.abs(stepDuration(1.5, 2.25, weights) - 1.32) < 1e-12);
-  for (const [start, delta, expected] of [
-    [1, 85, 1.1],
-    [2, -85, 1.9],
-  ]) {
-    const steps = createScrollSteps(5, () => 1000, false, start, weights);
-    steps.handle({ type: "touchStart", at: 0, time: start });
-    const [command] = steps.handle({
-      type: "touchMove",
-      at: 200,
-      time: start,
-      deltaY: delta,
-    });
-    assert.equal(command.type, "scrubTo");
-    assert.ok(Math.abs(command.time - expected) < 1e-12);
-  }
+  steps.handle({ type: "touchEnd", at: 300, time: 0.1 });
+  assert.deepEqual(
+    steps.handle({ type: "wheel", at: 400, time: 0.1, deltaY: 100 }),
+    animate(2),
+  );
 });

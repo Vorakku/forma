@@ -544,3 +544,107 @@ test("reduced motion cuts straight into and out of blueprint with instant theme 
   await landed(page, 2);
   expect(errors).toEqual([]);
 });
+
+test.describe("motion stopwatch", () => {
+  test("every single step lands within ten percent of its live stage motion budget", async ({
+    page,
+  }) => {
+    test.setTimeout(360_000);
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    for (const viewport of [
+      { width: 1808, height: 1018 },
+      { width: 375, height: 812 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/v2-demo");
+      const stage = await ready(page);
+      // Compile every real render state before measuring steady-state pacing.
+      // Cold loading/navigation is covered separately above.
+      for (let angle = 1; angle < SCROLL_ANGLES.length; angle++) {
+        await page.keyboard.press("ArrowDown");
+        await landed(page, angle);
+      }
+      for (let angle = SCROLL_ANGLES.length - 2; angle >= 0; angle--) {
+        await page.keyboard.press("ArrowUp");
+        await landed(page, angle);
+      }
+      await stage.evaluate((element) => {
+        let started: number | undefined;
+        let lastFrame = performance.now();
+        let longestFrame = 0;
+        const measurements: {
+          seconds: number;
+          budget: number;
+          longestFrame: number;
+        }[] = [];
+        // A step can only land on a rendered frame, so record the longest frame
+        // gap while it runs; software WebGL is slowest in the hinge close-up.
+        const frame = (now: number) => {
+          if (started !== undefined)
+            longestFrame = Math.max(longestFrame, (now - lastFrame) / 1000);
+          lastFrame = now;
+          requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+        (
+          window as typeof window & { stepMeasurements: typeof measurements }
+        ).stepMeasurements = measurements;
+        new MutationObserver(() => {
+          if (element.hasAttribute("data-moving")) {
+            if (started === undefined) longestFrame = 0;
+            started ??= performance.now();
+          } else if (started !== undefined) {
+            measurements.push({
+              seconds: (performance.now() - started) / 1000,
+              budget: Number((element as HTMLElement).dataset.motionDuration),
+              longestFrame,
+            });
+            started = undefined;
+          }
+        }).observe(element, {
+          attributes: true,
+          attributeFilter: ["data-moving"],
+        });
+      });
+      for (let angle = 1; angle < SCROLL_ANGLES.length; angle++) {
+        await page.keyboard.press("ArrowDown");
+        await landed(page, angle);
+      }
+      for (let angle = SCROLL_ANGLES.length - 2; angle >= 0; angle--) {
+        await page.keyboard.press("ArrowUp");
+        await landed(page, angle);
+      }
+      const measurements = await page.evaluate(
+        () =>
+          (
+            window as typeof window & {
+              stepMeasurements: {
+                seconds: number;
+                budget: number;
+                longestFrame: number;
+              }[];
+            }
+          ).stepMeasurements,
+      );
+      console.log(
+        JSON.stringify({ viewport, deviceScaleFactor: 1, measurements }),
+      );
+      expect(measurements).toHaveLength(2 * (SCROLL_ANGLES.length - 1));
+      for (const measurement of measurements) {
+        const detail = JSON.stringify({ viewport, ...measurement });
+        expect(measurement.seconds, detail).toBeGreaterThanOrEqual(
+          measurement.budget * 0.9,
+        );
+        // Ten percent, plus at most one frame of landing granularity.
+        expect(measurement.seconds, detail).toBeLessThanOrEqual(
+          measurement.budget * 1.1 + measurement.longestFrame,
+        );
+      }
+    }
+    expect(errors).toEqual([]);
+  });
+});
