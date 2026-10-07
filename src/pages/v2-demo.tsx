@@ -6,6 +6,8 @@ import { useGSAP } from "@gsap/react";
 import { useApp, useProduct, useProductList } from "@/lib/store";
 import { buildDisplayGlasses } from "@/tryon/glasses";
 import { createScrollViewer } from "@/tryon/scroll-viewer";
+import { buildMotionBudget } from "@/tryon/scroll-budget";
+import { animateScrollStep } from "@/tryon/scroll-animation";
 import { populateScrollTimeline } from "@/tryon/scroll-timeline";
 import { resolveScrollPoses, SCROLL_ANGLES } from "@/tryon/scroll-poses";
 import {
@@ -18,8 +20,6 @@ import {
 import {
   createScrollSteps,
   acceptsStepInput,
-  stepDuration,
-  scrollStepWeights,
   GESTURE_IDLE_MS,
   type StepCommand,
   type StepEvent,
@@ -142,16 +142,30 @@ export function V2Demo() {
         const header = document.querySelector<HTMLElement>(".site-header");
         const element = stage.current!;
         const last = SCROLL_ANGLES.length - 1;
-        const weights = scrollStepWeights(SCROLL_ANGLES);
+        const computeBudget = () =>
+          buildMotionBudget(
+            poses(),
+            viewer!.surfacePoints,
+            viewer!.width,
+            viewer!.height,
+          );
+        let budget = computeBudget();
+        const seconds = [...budget.seconds];
         const steps = createScrollSteps(
           SCROLL_ANGLES.length,
           () => window.innerHeight,
           false,
           0,
-          weights,
+          seconds,
         );
         const pose = { ...poses()[0] };
-        let stepTween: gsap.core.Tween | undefined;
+        let animation: ReturnType<typeof animateScrollStep> | undefined;
+        let activeTarget = 0;
+        let activeJump = false;
+        const stopAnimation = () => {
+          animation?.tween.kill();
+          animation = undefined;
+        };
         let timeline: gsap.core.Timeline;
         const update = () => {
           element.dataset.explode = String(pose.explode);
@@ -164,7 +178,7 @@ export function V2Demo() {
             });
         };
         timeline = gsap.timeline({ paused: true, onUpdate: update });
-        populateScrollTimeline(timeline, pose, poses());
+        populateScrollTimeline(timeline, pose, poses(), budget);
         update();
         const land = (index: number) => {
           element.dataset.angle = String(index);
@@ -178,11 +192,35 @@ export function V2Demo() {
           });
         };
         land(0);
+        const startAnimation = (
+          target: number,
+          jump: boolean,
+          velocity = 0,
+        ) => {
+          activeTarget = target;
+          activeJump = jump;
+          animation = animateScrollStep(timeline, budget, target, {
+            jump,
+            velocity,
+            onComplete: () => {
+              animation = undefined;
+              land(target);
+            },
+          });
+          element.dataset.motionDuration = String(animation.plan.duration);
+          if (document.hidden) animation.pause();
+        };
         refreshPose = () => {
           const time = timeline.time();
-          populateScrollTimeline(timeline, pose, poses());
-          timeline.time(time, true);
+          const running = !!animation,
+            velocity = animation?.velocity() ?? 0;
+          stopAnimation();
+          budget = computeBudget();
+          seconds.splice(0, seconds.length, ...budget.seconds);
+          populateScrollTimeline(timeline, pose, poses(), budget);
+          timeline.time(time, false);
           update();
+          if (running) startAnimation(activeTarget, activeJump, velocity);
         };
 
         media.add(
@@ -200,8 +238,8 @@ export function V2Demo() {
             gsap.set(element, { touchAction: "none" });
             const execute = (commands: StepCommand[]) => {
               for (const command of commands) {
-                stepTween?.kill();
-                stepTween = undefined;
+                const velocity = animation?.velocity() ?? 0;
+                stopAnimation();
                 if (command.type === "scrubTo") {
                   element.dataset.moving = "true";
                   timeline.time(command.time, false);
@@ -212,20 +250,7 @@ export function V2Demo() {
                     land(command.angle);
                   } else {
                     element.dataset.moving = "true";
-                    stepTween = gsap.to(timeline, {
-                      time: command.angle,
-                      duration: stepDuration(
-                        timeline.time(),
-                        command.angle,
-                        weights,
-                      ),
-                      ease: command.ease,
-                      onComplete: () => {
-                        stepTween = undefined;
-                        land(command.angle);
-                      },
-                    });
-                    if (document.hidden) stepTween.pause();
+                    startAnimation(command.angle, command.jump, velocity);
                   }
                 }
               }
@@ -281,7 +306,7 @@ export function V2Demo() {
                 ("touches" in event &&
                   (event as TouchEvent).touches.length > 1),
               onPress: () => {
-                stepTween?.pause();
+                animation?.pause();
                 send({
                   type: "touchStart",
                   at: performance.now(),
@@ -304,7 +329,7 @@ export function V2Demo() {
                   at: performance.now(),
                   time: timeline.time(),
                 });
-                stepTween?.resume();
+                animation?.resume();
               },
             });
             const keydown = (event: KeyboardEvent) => {
@@ -328,16 +353,15 @@ export function V2Demo() {
               send(input);
             };
             const visibility = () => {
-              if (document.hidden) stepTween?.pause();
-              else stepTween?.resume();
+              if (document.hidden) animation?.pause();
+              else animation?.resume();
             };
             document.addEventListener("keydown", keydown);
             document.addEventListener("visibilitychange", visibility);
             return () => {
               wheel.kill();
               touch.kill();
-              stepTween?.kill();
-              stepTween = undefined;
+              stopAnimation();
               document.removeEventListener("keydown", keydown);
               document.removeEventListener("visibilitychange", visibility);
             };
@@ -353,6 +377,7 @@ export function V2Demo() {
           element.removeAttribute("data-moving");
           element.removeAttribute("data-angle");
           element.removeAttribute("data-explode");
+          element.removeAttribute("data-motion-duration");
           viewer?.dispose();
         };
       } catch {

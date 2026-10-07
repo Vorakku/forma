@@ -45,6 +45,7 @@ export function createBlueprintRender() {
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
   scene.add(quad);
   let disposed = false;
+  let cachedRevision: number | undefined;
   return {
     draw(
       renderer: THREE.WebGLRenderer,
@@ -52,6 +53,7 @@ export function createBlueprintRender() {
       studioCamera: THREE.Camera,
       blueprint: ReturnType<typeof createBlueprint>,
       mix: number,
+      revision?: number,
     ) {
       const target = renderer.getRenderTarget();
       const environment = studioScene.environment;
@@ -74,11 +76,17 @@ export function createBlueprintRender() {
         if (studioTarget.width !== size.x || studioTarget.height !== size.y) {
           studioTarget.setSize(size.x, size.y);
           blueprintTarget.setSize(size.x, size.y);
+          cachedRevision = undefined;
         }
-        renderer.setRenderTarget(studioTarget);
-        renderer.render(studioScene, studioCamera);
-        renderer.setRenderTarget(blueprintTarget);
-        drawBlueprint();
+        // The orbit and assembly are stationary throughout a blueprint fade.
+        // Cache both images; a viewer revision invalidates camera/part/theme changes.
+        if (revision === undefined || revision !== cachedRevision) {
+          renderer.setRenderTarget(studioTarget);
+          renderer.render(studioScene, studioCamera);
+          renderer.setRenderTarget(blueprintTarget);
+          drawBlueprint();
+          cachedRevision = revision;
+        }
         renderer.setRenderTarget(target);
         material.uniforms.mixAmount.value = mix;
         material.uniforms.toneMappingExposure.value =
