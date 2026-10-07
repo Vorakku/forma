@@ -1,0 +1,142 @@
+.v2-demo-stage {
+  position: relative;
+  height: 100svh;
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.v2-demo-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.v2-demo-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 30px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.v2-demo-state a {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.v2-demo-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The sheet and 3D materials share these tokens; no JS palette copy. */
+:root[data-blueprint-theme] {
+  --blueprint-sheet: #0c0c0c;
+  --blueprint-grid: rgba(255, 255, 255, 0.04);
+  --blueprint-fill: #1a1a1a;
+  --blueprint-fill-opacity: 0.6;
+  --blueprint-lens: #ffffff;
+  --blueprint-lens-opacity: 0.05;
+  --blueprint-line: #ffffff;
+  --blueprint-hidden: #8a8a8a;
+  --blueprint-hidden-opacity: 0.45;
+  --blueprint-ink-swatch: #0c0c0c;
+  --blueprint-blue-swatch: #14304a;
+}
+:root[data-blueprint-theme="blue"] {
+  --blueprint-sheet: #14304a;
+  --blueprint-grid: rgba(255, 255, 255, 0.05);
+  --blueprint-fill: #1e4963;
+  --blueprint-fill-opacity: 0.55;
+  --blueprint-lens: #78d2e6;
+  --blueprint-lens-opacity: 0.08;
+  --blueprint-line: #d6edf6;
+  --blueprint-hidden: #97b5c7;
+}
+.v2-demo-studio,
+.v2-demo-sheet {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.v2-demo-studio {
+  background: radial-gradient(
+    ellipse at 50% 35%,
+    var(--paper),
+    var(--soft) 75%
+  );
+  opacity: calc(1 - var(--blueprint-mix, 0));
+}
+.v2-demo-sheet {
+  background-color: var(--blueprint-sheet);
+  background-image:
+    linear-gradient(var(--blueprint-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--blueprint-grid) 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: var(--blueprint-mix, 0);
+}
+.v2-demo-sheet::after {
+  content: "";
+  position: absolute;
+  inset: 16px;
+  border: 1px solid color-mix(in srgb, var(--blueprint-line) 25%, transparent);
+}
+.v2-demo-stage canvas {
+  position: relative;
+}
+.v2-demo-theme {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  gap: 4px;
+  visibility: hidden;
+  opacity: var(--blueprint-mix, 0);
+}
+:root[data-mode="blueprint"] .v2-demo-theme {
+  visibility: visible;
+}
+.v2-demo-theme button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--blueprint-line);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.v2-demo-theme button::after {
+  content: "";
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--blueprint-hidden);
+  background: var(--blueprint-ink-swatch);
+}
+.v2-demo-theme button[data-theme="blue"]::after {
+  background: var(--blueprint-blue-swatch);
+}
+.v2-demo-theme button[aria-pressed="true"],
+.v2-demo-theme button:focus-visible {
+  border-color: var(--blueprint-line);
+}
+.v2-demo-theme button:focus-visible {
+  outline: 1px solid var(--blueprint-line);
+  outline-offset: 3px;
+}

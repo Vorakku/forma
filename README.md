@@ -1,17 +1,30 @@
 # FORMA Eyewear
 
-An editorial glasses storefront: optical frames and sunglasses, lens and prescription selection, bag, checkout, orders, returns and accounts. It uses the same stack and project layout as Evira: React + Vite on the front, a Hono API on a Cloudflare Worker with Prisma + D1 behind it.
+FORMA is store #2 on MEGA-PROJECT's global commerce server. This separate repository contains the React/Vite storefront, static frame images and the try-on demo. Products, stock, lens prices, prescriptions, customers, orders and support are managed through the shared server and `admin/`. Its former Cloudflare Worker/D1 backend has been retired.
 
 ## Run locally
 
-Use Node.js 22.12 or later and npm, then:
+Use Node.js 24+, npm and the adjacent MEGA-PROJECT checkout. Start PostgreSQL/MinIO and apply the server's committed migrations before starting the storefront:
 
 ```sh
+# From MEGA-PROJECT/server; see its README for environment/storage setup
+npm run db:migrate
+npm run db:seed
+npm run dev                         # http://localhost:8787
+
+# In a separate terminal, from forma/
+cp .env.example .env
 npm install
-npm run dev
+npm run dev                         # http://localhost:4175
 ```
 
-Open http://localhost:4174 (Evira keeps 4173, so both can run side by side). No cloud account or secrets are required. Prisma Client is generated during installation. The dev server starts a local Worker runtime with Miniflare, applies the migrations in `drizzle/` and seeds 12 frames with labelled sample reviews. Every new visitor gets an isolated guest session; signing up turns that guest into an account without losing the bag, saved frames or orders.
+The root workspace installs the shared server/admin/contract; Forma installs separately. `.env.example` documents `VITE_STORE_KEY=pk_forma_dev` and `VITE_API_TARGET=http://localhost:8787`. Vite proxies `/api` for dev and preview with same-origin cookies and `X-Store-Key`; the server should use `TRUST_PROXY_HOPS=1`. Evira dev stays on 4173. FORMA end-to-end tests use 4176; 4174 belongs to Evira's tests.
+
+The seed creates 12 frames, Size × Color variants, specifications, lens add-ons, shipping and coupons. It is idempotent and preserves existing edits. Old `.sites-data` D1 files are unused; this migration does not import guest accounts or old demo orders. Admin images resolve existing `/images/...` URLs against Forma's first allowed origin, so keep its dev server running on 4175 while viewing those images in the admin. Uploaded images use shared S3/MinIO media storage.
+
+## Share a development preview
+
+Vite retains ngrok domain allowances and an optional exact `FORMA_SHARE_HOST` (hostname only) for another tunnel. Add `https://<share host>` to the **FORMA store's allowed origins** in shared admin Settings, after `http://localhost:4175` and `http://localhost:4176`. The server checks the browser Origin through the proxy; Vite's hostname allowance alone does not authorize API writes. Keep the local dev origin first for admin image resolution. The tunnel itself is not started by Forma.
 
 ## Checks and build
 
@@ -19,35 +32,37 @@ Open http://localhost:4174 (Evira keeps 4173, so both can run side by side). No 
 npm run typecheck
 npm test
 npm run build
+npm run test:e2e
 ```
 
-`npm test` runs the real API against a throwaway D1 database. It covers lens/prescription validation, stock limits across bag lines, authoritative totals and discounts, idempotent checkout, the delivery and return simulator, double-cancel safety, guest-to-account merging, the reset-code flow, and ownership checks. The build produces `dist/client` and `dist/server/index.js`. The Worker needs a `DB` (D1) binding plus `ASSETS` for the client.
+Unit tests cover adapter translation, named options, server lens prices, neutral swatch fallback and try-on/viewer behavior. Backend integration tests live in the global server and use real isolated PostgreSQL. Playwright uses Chromium, rebuilds `commerce_e2e` through `../server` on 8788, and starts Vite on 4176. Run admin, Evira and Forma browser suites sequentially because they share this test database. No browser suite uses development data. Screenshots are off unless `CAPTURE_SCREENSHOTS=1`.
 
-## Shop rules
+The browser journey exercises guest filtering/configuration, device saved frames, signup/cart merge, quote-based checkout with a prescription/coupon/address/demo card, delivery, reviews, support, logout/login and the try-on picker without camera access. `npm run build` produces `dist/client`; there is no Worker bundle or Prisma generation in this repository. `scripts/tryon-visual-check.mjs` uses the dev storefront on 4175.
 
-All money is integer cents. `src/lib/rules.ts` is shared by the Worker (which owns the totals) and the client (which uses it for previews):
+`/v2-demo` previews The Ellis in a full-screen stage with a floating header and no page scroll or footer. One wheel gesture steps one angle; slow wheel input and touch drags scrub one neighbouring transition and settle on idle/release. Arrow/page/space keys step, Home/End reach the ends, and reduced motion cuts instantly. The ordered angle table lives in `src/tryon/scroll-poses.ts`, and gesture rules/tuning constants in `src/tryon/scroll-steps.ts`. Both display viewers share `src/tryon/studio.ts`. GSAP Observer and Three.js stay lazy; ScrollTrigger is absent. With `CAPTURE_SCREENSHOTS=1 npm run test:e2e`, the demo tests save each landed angle to `/tmp/forma-v2-angle-<n>.png`.
 
-- Frames include non-prescription lenses. Single vision adds $50, reading adds $25. Finishes: blue-light +$25, light-adaptive +$60 (optical), polarized +$20 (sun).
-- `WELCOME10` gives 10% off. `FORMA20` gives $20 off a subtotal of $200 or more. One code at a time.
-- Standard shipping is $8, or free from $150 after discounts. Express is $18. Estimated tax is 8%.
-- Returns can be requested within 30 days of delivery. Cancelling or completing a return restores stock.
+## Shopping behavior
 
-## Demo boundaries
+- Catalog queries are server pages of six, with category, shape/material specs, fit options, price, stock, sale and sort filters. Search matches frame name or brand. Home/try-on queries and the product mapping cache are bounded; detail, recent and compare load products by ID or slug.
+- Lens type/finish choices and their prices come from the server. Seed prices: non-prescription $0, single vision $50, reading $25; optical blue-light $25/light-adaptive $60, sun polarized $20. Server cart line amounts and checkout quotes are authoritative, including discounts. Frame variant stock is shared across all lens configurations.
+- Browsing, bag, try-on and guest saved frames work anonymously. Checkout, orders/account, reviews and support require sign-in. Signup/sign-in merge the cookie bag and sync saved frames. Device storage contains saved/recent/compare IDs and coupon only; prescription and checkout contact values are not persisted there.
+- Checkout saves an address (label defaults Home) and uses a saved display-only demo card (brand, last four digits, expiry, holder). Nothing is charged. Last four digits `0002` decline. Submit uses an idempotency key and expected cart version.
+- Standard shipping is $8; express $18. `WELCOME10` is 10% off; `FORMA20` is $20 off a subtotal of at least $200. The free-shipping threshold and estimated tax are removed.
+- Orders display server numbers, lens/finish/prescription snapshots and events. Cancellation and reorder use server endpoints. Demo delivery advances only with `DEV_SIMULATIONS=true`. Delivered orders link to support for return requests; there is no return/RMA workflow.
+- Reviews are rating/text/likes and require a delivered purchase. Review titles, comments and sample reviews are removed. Support is a signed-in conversation with an optional development reply.
+- Cash on delivery, newsletter and restock subscriptions are removed. Wallet, notifications, passkeys and Forma realtime are not enabled. Forma refetches after its own writes.
+- Forgot/reset password shows the development code only when the server exposes it. Email changes require the current password; profile name is one full name.
 
-Payments, delivery, returns, support requests, newsletter and restock emails are simulations. Nothing is charged, shipped or emailed. Password reset displays its verification code on screen instead of emailing it. Replace that with a real delivery provider before real customers use the store. Passwords are salted PBKDF2 hashes, and sessions are HTTP-only cookies. Checkout, cancellation and returns use atomic D1 batches guarded by database constraints. Prescription values are stored with order lines and are not clinically verified.
+Prescriptions use the server's optional typed module and are visible only in owned cart/orders and authorized admin order detail. They never enter audit, CSV, realtime, notifications or server logs. Prescription validation is mathematical and does not provide clinical advice.
 
-## Project structure
+## Structure
 
-- `src/pages`: shop (home, catalog, product, saved), checkout, orders, auth, profile, help/guide/legal.
-- `src/components`: shell (header, footer, menu, search, compare), cart, lens editor, address fields, shared pieces.
-- `src/lib`: API client, Zustand store (device-only state: recently viewed, comparisons, checkout draft), catalog filtering, shared shop rules, optional WebMCP agent tools.
-- `src/styles.css`: FORMA's design, layered over Tailwind 4 theme + utilities (preflight is skipped; FORMA ships its own reset).
-- `server`: Hono API, demo catalog, Prisma/D1 access, crypto helpers.
-- `prisma/schema.prisma`: authoritative schema. Model and field names follow Evira's (`Product.price/originalPrice/stock/sold/sizes/colors/tag`, `Order.status/items/events`), so a shared admin can read both. FORMA-specific columns: `Product.swatches/shape/material/dimensions/weight/rank`, `CartItem.lens/coating/prescription`, `Order.tax/returnReason`, and the `Review`, `ReviewComment`, `SupportRequest`, `NewsletterSubscriber` and `RestockRequest` tables.
-- `drizzle`: SQL migrations (Prisma owns the schema). Generate new ones with `npx prisma migrate diff`.
-- `scripts`: local runtime, migrations and Worker build.
-- `tests`: API integration checks.
+- `src/lib/api.ts`: `/api/store` transport, store key, cookies and errors.
+- `src/lib/backend.ts`: the only translation layer that understands server contracts.
+- `src/lib/types.ts`, `store.ts`: FORMA view models, transient state and limited device persistence.
+- `src/lib/presentation.ts`: local color swatches with neutral fallback for new admin colors.
+- `src/pages`, `src/components`: shopping/account screens and shared UI.
+- `src/tryon`: camera/3D demo; Ellis and [Felix browline](doc/feature/3D-BROWLINE-VIEWER.md) use supplied reference reconstructions in both try-on and their lazy product viewers, identified by slug.
+- `tests`, `e2e`: adapter/try-on checks and the shopper journey.
 
-Order statuses are `placed → processing → shipped → delivered`, plus `cancelled`, `return_requested` and `returned`. The UI shows them as Confirmed, Preparing, Shipped, Delivered, Cancelled, Return requested and Returned.
-
-Local data lives in `.sites-data`. Stop the server and delete that folder to reset the demo.
+Try-on Phase 3 remains deferred. Its owner-approved plan is global product settings, GLBs in the media module's S3 storage, and the shared admin; see [3D module plan](doc/feature/3D-MODEL-MODULE.md).

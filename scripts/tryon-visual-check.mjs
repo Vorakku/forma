@@ -5,7 +5,7 @@ import sharp from 'sharp';
 import WebSocket from 'ws';
 import assert from 'node:assert/strict';
 
-// Run with the dev server on :4174. Chrome's fake camera loops the still hero face.
+// Run with the dev server on :4175. Chrome's fake camera loops the still hero face.
 const label=process.argv[2]??'after',runtime=resolve('.sites-runtime/tryon-visual'),output=resolve(process.argv[3]??'doc/feature/phase-1.6'),fixture=process.argv[4]??'neutral';
 await mkdir(runtime,{recursive:true});await mkdir(output,{recursive:true});
 let source=sharp('public/images/hero.webp');
@@ -35,7 +35,7 @@ try{
  closeBrowser=()=>send('Browser.close');
  const evaluate=async expression=>(await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true})).result.value;
  await send('Runtime.enable');await send('Log.enable');await send('Debugger.enable');await send('Page.enable');await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1100,deviceScaleFactor:1,mobile:false});
- await send('Page.navigate',{url:'http://localhost:4174/try-on?product=p01'});
+ await send('Page.navigate',{url:'http://localhost:4175/try-on?product=the-ellis'});
  for(let i=0;i<100;i++){if(await evaluate("!!Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Start camera')"))break;await new Promise(r=>setTimeout(r,100))}
  if(label==='after'){
   // Test-only inspection of the actual Three scenes, without adding a debug API to the app.
