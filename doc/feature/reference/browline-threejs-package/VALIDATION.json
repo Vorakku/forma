@@ -1,0 +1,39 @@
+{
+  "errors": [],
+  "snapshot": {
+    "count": 21,
+    "triangles": 55642,
+    "bad": 0,
+    "pivots": [
+      0,
+      0
+    ]
+  },
+  "wire": true,
+  "adjusted": true,
+  "dialog": true,
+  "mobileOverflow": false,
+  "glbBytes": 1450308,
+  "roundTrip": {
+    "meshes": 21,
+    "textured": 4,
+    "triangles": 55642,
+    "nosePads": 2,
+    "boundsMeters": [
+      0.1522758566439152,
+      0.050834884867072105,
+      0.14013223704770209
+    ]
+  },
+  "variantControls": {
+    "pads": true,
+    "wireSize": true,
+    "seed": true,
+    "poseRestored": true,
+    "blueprint": true
+  },
+  "portableBuild": {
+    "matchesDeliveredHtml": true,
+    "sha256": "6c1058b44a7baceac6726635f8df534d50f4bda7773172d7000ea843407bd52a"
+  }
+}
