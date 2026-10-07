@@ -10,6 +10,8 @@ export const STEP_MAX = 2.2;
 export const EXPLODE_MM = 30;
 export const EXPLODE_SHARE = 0.4;
 export const EXPLODE_STEP_WEIGHT = 1.4;
+export const BLUEPRINT_SHARE = 0.25;
+export const THREE_PHASE_STEP_WEIGHT = 1.7;
 
 export type StepCommand =
   | { type: "scrubTo"; time: number }
@@ -77,12 +79,20 @@ type Gesture = {
   consumed: boolean;
 };
 
-export function scrollStepWeights(states: readonly { exploded: boolean }[]) {
-  return states
-    .slice(1)
-    .map((state, index) =>
-      state.exploded !== states[index].exploded ? EXPLODE_STEP_WEIGHT : 1,
-    );
+export function scrollStepWeights(
+  states: readonly { exploded: boolean; blueprint?: boolean }[],
+) {
+  return states.slice(1).map((state, index) => {
+    const previous = states[index];
+    const changes =
+      Number(state.exploded !== previous.exploded) +
+      Number(!!state.blueprint !== !!previous.blueprint);
+    return changes > 1
+      ? THREE_PHASE_STEP_WEIGHT
+      : changes
+        ? EXPLODE_STEP_WEIGHT
+        : 1;
+  });
 }
 
 export function stepDuration(

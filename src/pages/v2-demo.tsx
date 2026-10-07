@@ -9,6 +9,13 @@ import { createScrollViewer } from "@/tryon/scroll-viewer";
 import { populateScrollTimeline } from "@/tryon/scroll-timeline";
 import { resolveScrollPoses, SCROLL_ANGLES } from "@/tryon/scroll-poses";
 import {
+  readBlueprintTheme,
+  saveBlueprintTheme,
+  readBlueprintTokens,
+  BLUEPRINT_TOKENS,
+  type BlueprintTheme,
+} from "@/tryon/blueprint-theme";
+import {
   createScrollSteps,
   acceptsStepInput,
   stepDuration,
@@ -45,6 +52,17 @@ export function V2Demo() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
   const [angle, setAngle] = useState(0);
+  const [theme, setTheme] = useState(() =>
+    readBlueprintTheme(() => window.localStorage),
+  );
+  const themeChoice = useRef(theme);
+  const applyTheme = useRef<(theme: BlueprintTheme) => void>(() => {});
+  const chooseTheme = (choice: BlueprintTheme) => {
+    themeChoice.current = choice;
+    setTheme(choice);
+    saveBlueprintTheme(() => window.localStorage, choice);
+    applyTheme.current(choice);
+  };
 
   useGSAP(
     () => {
@@ -54,15 +72,66 @@ export function V2Demo() {
       let refreshPose = () => {};
       let live = true;
       const media = gsap.matchMedia();
+      const root = document.documentElement;
+      let themeTween: gsap.core.Tween | undefined;
+      let reducedMotion = false;
+      const clearThemeOverrides = () => {
+        for (const token of BLUEPRINT_TOKENS)
+          root.style.removeProperty(`--blueprint-${token}`);
+      };
+      const clearMode = () => {
+        themeTween?.kill();
+        clearThemeOverrides();
+        root.style.removeProperty("--blueprint-mix");
+        root.removeAttribute("data-mode");
+        root.removeAttribute("data-blueprint-theme");
+        applyTheme.current = () => {};
+      };
       try {
         viewer = createScrollViewer({
           canvas: canvas.current,
           onError: () => {
+            clearMode();
             if (live) setError(true);
           },
           onResize: () => refreshPose(),
         });
         viewer.setObject(buildDisplayGlasses(product, 0));
+        root.dataset.blueprintTheme = themeChoice.current;
+        const recolor = () =>
+          viewer!.setBlueprintTokens(
+            readBlueprintTokens(getComputedStyle(root)),
+          );
+        recolor();
+        applyTheme.current = (choice) => {
+          themeTween?.kill();
+          const previous = readBlueprintTokens(getComputedStyle(root));
+          clearThemeOverrides();
+          root.dataset.blueprintTheme = choice;
+          const next = readBlueprintTokens(getComputedStyle(root));
+          if (reducedMotion) {
+            recolor();
+            return;
+          }
+          const properties = (tokens: typeof next) =>
+            Object.fromEntries(
+              BLUEPRINT_TOKENS.map((token) => [
+                `--blueprint-${token}`,
+                tokens[token],
+              ]),
+            );
+          themeTween = gsap.fromTo(root, properties(previous), {
+            ...properties(next),
+            duration: 0.2,
+            ease: "none",
+            onUpdate: recolor,
+            onComplete: () => {
+              clearThemeOverrides();
+              recolor();
+              themeTween = undefined;
+            },
+          });
+        };
         const poses = () =>
           resolveScrollPoses(
             viewer!.radius,
@@ -85,8 +154,10 @@ export function V2Demo() {
         let stepTween: gsap.core.Tween | undefined;
         let timeline: gsap.core.Timeline;
         const update = () => {
-          viewer!.setPose(pose);
           element.dataset.explode = String(pose.explode);
+          root.style.setProperty("--blueprint-mix", String(pose.blueprint));
+          root.dataset.mode = pose.blueprint >= 0.5 ? "blueprint" : "studio";
+          viewer!.setPose(pose);
           if (header)
             gsap.set(header, {
               autoAlpha: headerOpacity(timeline.time(), last),
@@ -120,6 +191,10 @@ export function V2Demo() {
             normal: "(prefers-reduced-motion: no-preference)",
           },
           (context) => {
+            reducedMotion = !!context.conditions?.reduced;
+            themeTween?.kill();
+            clearThemeOverrides();
+            recolor();
             gsap.set(document.documentElement, { overflow: "hidden" });
             gsap.set(document.body, { overflow: "hidden" });
             gsap.set(element, { touchAction: "none" });
@@ -201,6 +276,8 @@ export function V2Demo() {
               preventDefault: true,
               ignoreCheck: (event) =>
                 blocked(event.target) ||
+                (event.target instanceof Element &&
+                  !!event.target.closest(".v2-demo-theme")) ||
                 ("touches" in event &&
                   (event as TouchEvent).touches.length > 1),
               onPress: () => {
@@ -270,6 +347,7 @@ export function V2Demo() {
         return () => {
           live = false;
           media.revert();
+          clearMode();
           refreshPose = () => {};
           timeline.kill();
           element.removeAttribute("data-moving");
@@ -279,6 +357,7 @@ export function V2Demo() {
         };
       } catch {
         media.revert();
+        clearMode();
         viewer?.dispose();
         setError(true);
       }
@@ -299,6 +378,8 @@ export function V2Demo() {
       aria-label="The Ellis scroll preview"
       aria-busy={!ready && !unavailable && !empty}
     >
+      <div className="v2-demo-studio" aria-hidden="true" />
+      <div className="v2-demo-sheet" aria-hidden="true" />
       {product && !unavailable && (
         <canvas
           ref={canvas}
@@ -309,8 +390,20 @@ export function V2Demo() {
       <span className="v2-demo-announcement" aria-live="polite">
         {ready &&
           !unavailable &&
-          `Angle ${angle + 1} of ${SCROLL_ANGLES.length}: ${SCROLL_ANGLES[angle].name}${SCROLL_ANGLES[angle].exploded ? ", taken apart" : ""}`}
+          `Angle ${angle + 1} of ${SCROLL_ANGLES.length}: ${SCROLL_ANGLES[angle].name}${SCROLL_ANGLES[angle].exploded ? ", taken apart" : ""}${SCROLL_ANGLES[angle].blueprint ? ", blueprint" : ""}`}
       </span>
+      <div className="v2-demo-theme" role="group" aria-label="Blueprint theme">
+        {(["ink", "blue"] as const).map((choice) => (
+          <button
+            key={choice}
+            type="button"
+            data-theme={choice}
+            aria-label={`${choice === "ink" ? "Ink" : "Blue"} blueprint`}
+            aria-pressed={theme === choice}
+            onClick={() => chooseTheme(choice)}
+          />
+        ))}
+      </div>
       {(unavailable || empty || !ready) && (
         <div className="v2-demo-state" role="status">
           {unavailable ? (

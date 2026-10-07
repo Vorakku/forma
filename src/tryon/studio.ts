@@ -15,7 +15,11 @@ export function fitDistance(radius: number, aspect: number, fov = VIEWER_FOV) {
   );
 }
 
-export function createStudio(canvas: HTMLCanvasElement, onError: () => void) {
+export function createStudio(
+  canvas: HTMLCanvasElement,
+  onError: () => void,
+  beforeDispose?: () => void,
+) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(VIEWER_FOV, 1, 0.1, 1000);
   let renderer: THREE.WebGLRenderer | undefined;
@@ -29,6 +33,7 @@ export function createStudio(canvas: HTMLCanvasElement, onError: () => void) {
     if (stopped) return;
     stopped = true;
     canvas.removeEventListener("webglcontextlost", contextLost);
+    beforeDispose?.();
     scene.traverse((node) => {
       if (node instanceof THREE.DirectionalLight) node.shadow.dispose();
     });
@@ -146,10 +151,11 @@ export function createStudio(canvas: HTMLCanvasElement, onError: () => void) {
       );
       renderer!.setSize(width, height, false);
     },
-    render() {
+    render(draw?: (renderer: THREE.WebGLRenderer) => void) {
       if (stopped || document.hidden) return;
       try {
-        renderer!.render(scene, camera);
+        if (draw) draw(renderer!);
+        else renderer!.render(scene, camera);
       } catch {
         dispose();
         onError();

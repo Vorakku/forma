@@ -274,3 +274,32 @@ test("split step weights scale full/partial/reverse durations and scrub distance
     [],
   );
 });
+
+test("three-phase blueprint steps get weight 1.7 in both directions without altering flick classification", () => {
+  const weights = scrollStepWeights([
+    { exploded: false, blueprint: false },
+    { exploded: true, blueprint: false },
+    { exploded: false, blueprint: true },
+    { exploded: false, blueprint: false },
+    { exploded: false, blueprint: false },
+  ]);
+  assert.deepEqual(weights, [1.4, 1.7, 1.4, 1]);
+  assert.ok(Math.abs(stepDuration(1, 2, weights) - 1.87) < 1e-12);
+  assert.equal(stepDuration(2, 1, weights), stepDuration(1, 2, weights));
+  assert.ok(Math.abs(stepDuration(1.5, 2.25, weights) - 1.32) < 1e-12);
+  for (const [start, delta, expected] of [
+    [1, 85, 1.1],
+    [2, -85, 1.9],
+  ]) {
+    const steps = createScrollSteps(5, () => 1000, false, start, weights);
+    steps.handle({ type: "touchStart", at: 0, time: start });
+    const [command] = steps.handle({
+      type: "touchMove",
+      at: 200,
+      time: start,
+      deltaY: delta,
+    });
+    assert.equal(command.type, "scrubTo");
+    assert.ok(Math.abs(command.time - expected) < 1e-12);
+  }
+});

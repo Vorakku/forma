@@ -1,7 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
@@ -15,7 +15,7 @@ const output = resolve(".sites-runtime/viewer-tests.mjs");
 await build({
   stdin: {
     contents:
-      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './explode';export * from './scroll-steps';",
+      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';",
     resolveDir: resolve("src/tryon"),
   },
   outfile: output,
@@ -57,6 +57,16 @@ const {
   createExploder,
   EXPLODE_MM,
   EXPLODE_SHARE,
+  BLUEPRINT_SHARE,
+  createBlueprint,
+  ellisBlueprintCurves,
+  ELLIS_FRONT_DEPTH,
+  warp,
+  readBlueprintTokens,
+  readBlueprintTheme,
+  saveBlueprintTheme,
+  BLUEPRINT_THEME_KEY,
+  buildEllis,
 } = await import(pathToFileURL(output));
 after(() => rm(output, { force: true }));
 const product = (overrides = {}) => ({
@@ -168,6 +178,18 @@ function devices({
       this.pixelRatio = value;
     }
     setClearColor() {}
+    getRenderTarget() {
+      return this.target ?? null;
+    }
+    setRenderTarget(target) {
+      this.target = target;
+    }
+    getDrawingBufferSize(size) {
+      return size.set(
+        this.size[0] * this.pixelRatio,
+        this.size[1] * this.pixelRatio,
+      );
+    }
     setSize(width, height) {
       this.size = [width, height];
     }
@@ -824,7 +846,8 @@ test("one linear GSAP orbit timeline matches integer angles and never crosses a 
     equals(poses[index]);
     if (
       index < poses.length - 1 &&
-      poses[index].explode === poses[index + 1].explode
+      poses[index].explode === poses[index + 1].explode &&
+      poses[index].blueprint === poses[index + 1].blueprint
     ) {
       timeline.time(index + 0.5, false);
       equals(
@@ -971,7 +994,7 @@ test("frames with a missing reference assembly make explode a silent no-op", () 
   disposeObject(model);
 });
 
-test("split timeline parks the camera whenever exploded, in both directions and on resize rebuild", async () => {
+test("split timeline parks the camera whenever exploded or blueprint, in both directions and on resize rebuild", async () => {
   const { gsap } = await import("gsap");
   const poses = resolveScrollPoses(10, 1, () => ({ x: 6, y: 1, z: 5 }), 15);
   const pose = { ...poses[0] };
@@ -981,7 +1004,9 @@ test("split timeline parks the camera whenever exploded, in both directions and 
     poses,
   );
   const equalsOrbit = (expected) => {
-    for (const key of Object.keys(expected).filter((key) => key !== "explode"))
+    for (const key of Object.keys(expected).filter(
+      (key) => key !== "explode" && key !== "blueprint",
+    ))
       assert.ok(Math.abs(pose[key] - expected[key]) < 1e-6, key);
   };
   for (const direction of [1, -1]) {
@@ -989,6 +1014,8 @@ test("split timeline parks the camera whenever exploded, in both directions and 
       const time = direction === 1 ? index / 100 : (400 - index) / 100;
       timeline.time(time, false);
       if (pose.explode > 0) equalsOrbit(poses[1]);
+      if (pose.blueprint > 0) equalsOrbit(poses[2]);
+      assert.ok(!(pose.explode > 0 && pose.blueprint > 0));
       if (time <= 1 - EXPLODE_SHARE || time >= 1 + EXPLODE_SHARE)
         assert.equal(pose.explode, 0);
     }
@@ -1013,6 +1040,29 @@ test("split timeline parks the camera whenever exploded, in both directions and 
   timeline.time(1.2, false);
   equalsOrbit(poses[1]);
   assert.equal(pose.explode, 0.5);
+  for (const [time, amount] of [
+    [1, 0],
+    [1.4, 0],
+    [1.75, 0],
+    [1.875, 0.5],
+    [2, 1],
+    [2.125, 0.5],
+    [2.25, 0],
+    [3, 0],
+  ]) {
+    timeline.time(time, false);
+    assert.ok(Math.abs(pose.blueprint - amount) < 1e-6);
+  }
+  timeline.time(1.575, false);
+  assert.equal(pose.explode, 0);
+  assert.equal(pose.blueprint, 0);
+  assert.notEqual(pose.theta, poses[1].theta);
+  assert.notEqual(pose.phi, poses[2].phi);
+  timeline.time(1.875, false);
+  equalsOrbit(poses[2]);
+  assert.equal(pose.explode, 0);
+  timeline.time(2.125, false);
+  equalsOrbit(poses[2]);
   timeline.time(1.7, false);
   assert.equal(pose.explode, 0);
   assert.notEqual(pose.theta, poses[1].theta);
@@ -1165,4 +1215,347 @@ test("scroll viewer renders on demand, fits on resize and releases resources on 
   assert.equal(h.doc.count(), 0);
   viewer.dispose();
   assert.equal(h.environment.disposals, 1);
+});
+
+const blueprintCSS = await readFile("src/pages/v2-demo.css", "utf8");
+function tokensFor(theme) {
+  const block = (selector) =>
+    blueprintCSS.slice(blueprintCSS.indexOf(selector)).split("}")[0];
+  const values = Object.fromEntries(
+    (
+      block(":root[data-blueprint-theme]") +
+      (theme === "blue" ? block(':root[data-blueprint-theme="blue"]') : "")
+    )
+      .matchAll(/(--blueprint-[\w-]+):\s*([^;]+);/g)
+      .map((match) => [match[1], match[2].trim()]),
+  );
+  return readBlueprintTokens({ getPropertyValue: (key) => values[key] ?? "" });
+}
+
+test("exporting Ellis design curves preserves product and try-on geometry, materials and transforms byte for byte", () => {
+  for (const [overlay, expected] of [
+    [false, "56366e13e7cf8f8cddfa8dfff7f736f87dc068b90f7d986db20ecce6581f21df"],
+    [true, "bfd6d6172914cc5bea850f2123614dd80dbdabe1d266ce8c26d009e118adeb22"],
+  ]) {
+    const model = buildEllis(undefined, { overlay });
+    const hash = createHash("sha256");
+    model.traverse((node) => {
+      hash.update(node.name);
+      hash.update(
+        JSON.stringify([
+          node.position.toArray(),
+          node.quaternion.toArray(),
+          node.scale.toArray(),
+        ]),
+      );
+      if (!node.isMesh) return;
+      for (const [name, attribute] of Object.entries(
+        node.geometry.attributes,
+      )) {
+        hash.update(name);
+        hash.update(Buffer.from(attribute.array.buffer));
+      }
+      if (node.geometry.index)
+        hash.update(Buffer.from(node.geometry.index.array.buffer));
+      const { uuid, metadata, ...material } = node.material.toJSON();
+      hash.update(JSON.stringify(material));
+    });
+    assert.equal(
+      hash.digest("hex"),
+      expected,
+      "hash recorded before Round 4 refactoring",
+    );
+    disposeObject(model);
+  }
+});
+
+test("blueprint design lines follow both warped front faces and actual arm surface vertices, parented to moving parts", () => {
+  const model = buildDisplayGlasses(product(), 0);
+  const curves = ellisBlueprintCurves(model);
+  assert.equal(curves.length, 16); // Six outlines, eight arm edges, two centre curves.
+  for (const { part, points, centre } of curves) {
+    if (part.name === "front_frame")
+      for (const p of points) {
+        assert.ok(
+          Math.abs(
+            Math.abs(p.z - warp(p.x * 1000, p.y * 1000) * 0.001) -
+              ELLIS_FRONT_DEPTH * 0.0005,
+          ) < 1e-12,
+        );
+      }
+    else if (!centre) {
+      const vertices = part.geometry.attributes.position;
+      for (const p of points) {
+        let closest = Infinity;
+        for (let i = 0; i < vertices.count; i++)
+          closest = Math.min(
+            closest,
+            p.distanceTo(new THREE.Vector3().fromBufferAttribute(vertices, i)),
+          );
+        assert.ok(closest < 1e-8, "arm point is an authored surface vertex");
+      }
+    }
+  }
+  const blueprint = createBlueprint(model);
+  const lines = [];
+  model.traverse((n) => {
+    if (n.isLine2 || n.isLineSegments2) lines.push(n);
+  });
+  assert.equal(lines.length, 30);
+  assert.ok(
+    lines
+      .filter((line) => line.name.endsWith("centre"))
+      .every(
+        (line) =>
+          line.material.depthFunc === THREE.GreaterDepth &&
+          line.material.dashed,
+      ),
+  );
+  assert.ok(
+    lines.every((line) =>
+      ["front_frame", "temple_L", "temple_R"].includes(line.parent.name),
+    ),
+  );
+  assert.ok(
+    lines
+      .filter((line) => line.name.endsWith("hidden"))
+      .every(
+        (line) =>
+          line.material.depthFunc === THREE.GreaterDepth &&
+          line.material.dashed,
+      ),
+  );
+  const line = lines.find((line) => line.parent.name === "temple_R");
+  const before = line.getWorldPosition(new THREE.Vector3());
+  createExploder(model, EXPLODE_MM).set(1);
+  const after = line.getWorldPosition(new THREE.Vector3());
+  assert.ok(
+    after.distanceTo(before.clone().add(new THREE.Vector3(3, 0, -1.2))) < 1e-12,
+  );
+  blueprint.dispose();
+  assert.ok(lines.every((line) => line.parent === null));
+  disposeObject(model);
+});
+
+test("CSS theme tokens recolor flat materials without rebuilding; DPR widths and missing-outline fallback work", () => {
+  for (const model of [
+    buildDisplayGlasses(product(), 0),
+    buildDisplayGlasses(product({ slug: "the-remy", shape: "Round" }), 0),
+  ]) {
+    const blueprint = createBlueprint(model);
+    const lines = [];
+    model.traverse((n) => {
+      if (n.isLine2 || n.isLineSegments2) lines.push(n);
+    });
+    assert.ok(lines.length > 0);
+    if (!model.getObjectByName("ellis.reference"))
+      assert.ok(lines.every((line) => line.isLineSegments2));
+    const geometries = lines.map((line) => line.geometry);
+    let front = model.getObjectByName("front_frame");
+    if (!front)
+      model.traverse((n) => {
+        if (!front && n.isMesh && !n.isLineSegments2) front = n;
+      });
+    const original = front.material;
+    const releases = new Map();
+    for (const resource of new Set([
+      ...geometries,
+      ...lines.map((line) => line.material),
+    ]))
+      resource.addEventListener("dispose", () =>
+        releases.set(resource, (releases.get(resource) ?? 0) + 1),
+      );
+    for (const theme of ["ink", "blue"]) {
+      const tokens = tokensFor(theme);
+      blueprint.recolor(tokens);
+      blueprint.resize(375, 812, 2);
+      blueprint.draw(() => {
+        assert.ok(front.material.isMeshBasicMaterial);
+        assert.equal(
+          front.material.color.getHexString(),
+          theme === "ink" ? "1a1a1a" : "1e4963",
+        );
+        assert.equal(front.material.opacity, theme === "ink" ? 0.6 : 0.55);
+        assert.ok(!("transmission" in front.material));
+        for (const line of lines) {
+          const visible = line.name.endsWith("visible");
+          assert.equal(
+            line.material.color.getHexString(),
+            tokens[visible ? "line" : "hidden"].slice(1),
+          );
+          assert.equal(line.material.opacity, visible ? 1 : 0.45);
+          assert.equal(line.material.linewidth, visible ? 3.4 : 2);
+          assert.deepEqual(line.material.resolution.toArray(), [750, 1624]);
+          assert.ok(line.visible);
+        }
+        for (const name of ["lens_L", "lens_R"]) {
+          const lens = model.getObjectByName(name);
+          if (!lens) continue;
+          assert.equal(
+            lens.material.color.getHexString(),
+            theme === "ink" ? "ffffff" : "78d2e6",
+          );
+          assert.equal(lens.material.opacity, theme === "ink" ? 0.05 : 0.08);
+          assert.equal(lens.material.depthWrite, false);
+        }
+      });
+      assert.equal(front.material, original);
+      assert.ok(lines.every((line) => !line.visible));
+      assert.deepEqual(
+        lines.map((line) => line.geometry),
+        geometries,
+      );
+    }
+    assert.throws(() =>
+      blueprint.draw(() => {
+        throw Error("GPU failure");
+      }),
+    );
+    assert.equal(front.material, original);
+    blueprint.dispose();
+    blueprint.dispose();
+    assert.ok([...releases.values()].every((count) => count === 1));
+    assert.equal(
+      releases.size,
+      new Set([...geometries, ...lines.map((line) => line.material)]).size,
+    );
+    disposeObject(model);
+  }
+});
+
+test("mix zero retains studio materials and render state, partial/full blueprint restores state and cleans GPU resources", () => {
+  const h = devices();
+  const viewer = createScrollViewer({
+    canvas: h.canvas,
+    onError: () => assert.fail("unexpected failure"),
+  });
+  const model = buildDisplayGlasses(product(), 0);
+  viewer.setObject(model);
+  viewer.setBlueprintTokens(tokensFor("ink"));
+  const poses = resolveScrollPoses(
+    viewer.radius,
+    viewer.aspect,
+    viewer.getAnchor,
+    viewer.explodedRadius,
+  );
+  viewer.setPose({ ...poses[0], blueprint: 0 });
+  const renderer = h.renderers[0];
+  const scene = renderer.scene;
+  const environment = scene.environment;
+  const original = model.getObjectByName("front_frame").material;
+  const floor = scene.getObjectByName("floor");
+  const state = {
+    shadow: renderer.shadowMap.enabled,
+    visible: floor.visible,
+    tone: renderer.toneMapping,
+    exposure: renderer.toneMappingExposure,
+  };
+  const initialRenders = renderer.renders;
+  for (const mix of [0.2, 0.8, 1, 0]) {
+    viewer.setPose({ ...poses[2], blueprint: mix });
+    assert.equal(model.getObjectByName("front_frame").material, original);
+    assert.equal(scene.environment, environment);
+    assert.deepEqual(
+      {
+        shadow: renderer.shadowMap.enabled,
+        visible: floor.visible,
+        tone: renderer.toneMapping,
+        exposure: renderer.toneMappingExposure,
+      },
+      state,
+    );
+    assert.equal(renderer.getRenderTarget(), null);
+  }
+  assert.equal(renderer.renders - initialRenders, 8); // Two three-pass fades and two direct endpoint renders.
+  const renders = renderer.renders;
+  h.doc.hidden = true;
+  viewer.setPose({ ...poses[2], blueprint: 0.5 });
+  viewer.setBlueprintTokens(tokensFor("blue"));
+  assert.equal(renderer.renders, renders);
+  viewer.dispose();
+  viewer.dispose();
+  assert.ok(renderer.disposed);
+  assert.equal(h.callbacks.size, 0);
+});
+
+test("saved blueprint choice validates values and tolerates reads, getter and writes denied by storage", () => {
+  assert.equal(
+    readBlueprintTheme(() => ({
+      getItem: (key) => {
+        assert.equal(key, BLUEPRINT_THEME_KEY);
+        return "blue";
+      },
+    })),
+    "blue",
+  );
+  for (const value of [null, "", "paper", "ink"])
+    assert.equal(
+      readBlueprintTheme(() => ({ getItem: () => value })),
+      "ink",
+    );
+  assert.equal(
+    readBlueprintTheme(() => {
+      throw Error("denied getter");
+    }),
+    "ink",
+  );
+  assert.equal(
+    readBlueprintTheme(() => ({
+      getItem: () => {
+        throw Error("denied read");
+      },
+    })),
+    "ink",
+  );
+  assert.doesNotThrow(() =>
+    saveBlueprintTheme(
+      () => ({
+        setItem: () => {
+          throw Error("denied write");
+        },
+      }),
+      "blue",
+    ),
+  );
+});
+
+test("blueprint lines are disposed once when the shared studio fails or loses context", () => {
+  for (const failure of ["context", "render"]) {
+    const h = devices();
+    const viewer = createScrollViewer({
+      canvas: h.canvas,
+      onError: () => h.errors.push(failure),
+    });
+    const model = buildDisplayGlasses(product(), 0);
+    viewer.setObject(model);
+    viewer.setBlueprintTokens(tokensFor("ink"));
+    const pose = resolveScrollPoses(
+      viewer.radius,
+      viewer.aspect,
+      viewer.getAnchor,
+      viewer.explodedRadius,
+    )[2];
+    viewer.setPose(pose);
+    const counts = new Map(
+      resources(model).map((resource) => {
+        resource.addEventListener("dispose", () =>
+          counts.set(resource, counts.get(resource) + 1),
+        );
+        return [resource, 0];
+      }),
+    );
+    if (failure === "context") h.event(h.canvas, "webglcontextlost");
+    else {
+      h.failRender = true;
+      viewer.setPose({ ...pose, blueprint: 0.5 });
+    }
+    viewer.dispose();
+    assert.deepEqual(h.errors, [failure]);
+    assert.ok(
+      [...counts.values()].every((count) => count === 1),
+      "each mesh/line geometry and material is released once",
+    );
+    assert.equal(h.canvas.count(), 0);
+    assert.ok(h.renderers[0].disposed);
+  }
 });

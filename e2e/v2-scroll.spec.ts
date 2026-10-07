@@ -24,12 +24,16 @@ async function landed(page: Page, angle: number) {
     timeout: 30_000,
   });
   await expect(stage).not.toHaveAttribute("data-moving");
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-mode",
+    SCROLL_ANGLES[angle].blueprint ? "blueprint" : "studio",
+  );
   await expect(stage).toHaveAttribute(
     "data-explode",
     SCROLL_ANGLES[angle].exploded ? "1" : "0",
   );
   await expect(stage.locator('[aria-live="polite"]')).toHaveText(
-    `Angle ${angle + 1} of ${SCROLL_ANGLES.length}: ${SCROLL_ANGLES[angle].name}${SCROLL_ANGLES[angle].exploded ? ", taken apart" : ""}`,
+    `Angle ${angle + 1} of ${SCROLL_ANGLES.length}: ${SCROLL_ANGLES[angle].name}${SCROLL_ANGLES[angle].exploded ? ", taken apart" : ""}${SCROLL_ANGLES[angle].blueprint ? ", blueprint" : ""}`,
   );
 }
 async function capture(page: Page, angle: number) {
@@ -76,8 +80,11 @@ test("cold arrival, one notch/burst per angle, integer landings, keys and naviga
   if (process.env.CAPTURE_SCREENSHOTS === "1")
     await stage.screenshot({ path: "/tmp/forma-v2-angle-1-exploded.png" });
   for (let index = 2; index < SCROLL_ANGLES.length; index++) {
-    // All ten belong to one gesture, including events during the step tween.
-    for (let notch = 0; notch < 10; notch++) await page.mouse.wheel(0, 100);
+    // Queue the native burst together. Awaiting each dispatch can let software
+    // rendering insert >180 ms gaps, which correctly become separate gestures.
+    await Promise.all(
+      Array.from({ length: 10 }, () => page.mouse.wheel(0, 100)),
+    );
     await landed(page, index);
     captures.push(await capture(page, index));
     if (index < SCROLL_ANGLES.length - 1) await expect(header).toBeHidden();
@@ -263,13 +270,15 @@ test("reduced motion cuts synchronously once per gesture and changes live", asyn
   await expect(page.locator(".site-header")).toHaveCSS("opacity", "1");
 });
 
-test("context loss restores the header and stops input handling", async ({
+test("context loss in blueprint restores the header, removes root state and stops input handling", async ({
   page,
 }) => {
   await page.goto("/v2-demo");
   const stage = await ready(page);
   await page.keyboard.press("ArrowDown");
   await landed(page, 1);
+  await page.keyboard.press("ArrowDown");
+  await landed(page, 2);
   await stage
     .locator("canvas")
     .evaluate((element) =>
@@ -278,6 +287,15 @@ test("context loss restores the header and stops input handling", async ({
       ),
     );
   await expect(stage.getByText("The 3D view is unavailable.")).toBeVisible();
+  await expect(page.locator("html")).not.toHaveAttribute("data-mode");
+  await expect(page.locator("html")).not.toHaveAttribute(
+    "data-blueprint-theme",
+  );
+  expect(
+    await page.evaluate(() =>
+      document.documentElement.style.getPropertyValue("--blueprint-mix"),
+    ),
+  ).toBe("");
   await expect(
     stage.getByRole("link", { name: "Explore The Ellis" }),
   ).toHaveAttribute("href", "/product/the-ellis");
@@ -353,6 +371,18 @@ test("real CDP touch drag holds a scrub then lands on release; header touch rema
       touchPoints: [],
     });
     await landed(page, 1);
+    await page.keyboard.press("ArrowDown");
+    await landed(page, 2);
+    await page.getByRole("button", { name: "Blue blueprint" }).tap();
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-blueprint-theme",
+      "blue",
+    );
+    await expect(
+      page.getByRole("button", { name: "Blue blueprint" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(stage).not.toHaveAttribute("data-moving");
+    await landed(page, 2);
     await page.keyboard.press("Home");
     await landed(page, 0);
     await page.getByRole("link", { name: "FORMA home" }).tap();
@@ -382,5 +412,135 @@ test("assembly steps 0 → 1 → 2 → 1 → 0 in both directions without errors
     await page.mouse.wheel(0, delta);
     await landed(page, angle);
   }
+  expect(errors).toEqual([]);
+});
+
+test("blueprint swatches use keyboard toggles, persist Blue, and remove root state on navigation", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await page.goto("/v2-demo");
+  const stage = await ready(page);
+  const control = page.getByRole("group", {
+    name: "Blueprint theme",
+    includeHidden: true,
+  });
+  const blue = page.getByRole("button", {
+    name: "Blue blueprint",
+    includeHidden: true,
+  });
+  const ink = page.getByRole("button", {
+    name: "Ink blueprint",
+    includeHidden: true,
+  });
+  await expect(control).toBeHidden();
+  expect(
+    await blue.evaluate((button) => {
+      button.focus();
+      return document.activeElement === button;
+    }),
+  ).toBeFalsy();
+  await page.keyboard.press("ArrowDown");
+  await landed(page, 1);
+  await expect(control).toBeHidden();
+  await page.keyboard.press("ArrowDown");
+  await landed(page, 2);
+  await expect(control).toBeVisible();
+  await expect(page.locator(".site-header")).toBeHidden();
+  await expect(ink).toHaveAttribute("aria-pressed", "true");
+  if (process.env.CAPTURE_SCREENSHOTS === "1")
+    await stage.screenshot({ path: "/tmp/forma-v2-blueprint-ink.png" });
+  await blue.focus();
+  await page.keyboard.press("Space");
+  await expect(blue).toHaveAttribute("aria-pressed", "true");
+  await expect(ink).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-blueprint-theme",
+    "blue",
+  );
+  await page.waitForTimeout(250);
+  await landed(page, 2);
+  if (process.env.CAPTURE_SCREENSHOTS === "1")
+    await stage.screenshot({ path: "/tmp/forma-v2-blueprint-blue.png" });
+  expect(
+    await page.evaluate(() => localStorage.getItem("forma.v2.blueprintTheme")),
+  ).toBe("blue");
+  // Wheel over a focused swatch still steps; Space only activates the button.
+  await blue.hover();
+  await page.mouse.wheel(0, 100);
+  await landed(page, 3);
+  await expect(control).toBeHidden();
+  await page.reload();
+  await ready(page);
+  await page.keyboard.press("ArrowDown");
+  await landed(page, 1);
+  await page.keyboard.press("ArrowDown");
+  await landed(page, 2);
+  await expect(blue).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-blueprint-theme",
+    "blue",
+  );
+  await page.keyboard.press("End");
+  await landed(page, SCROLL_ANGLES.length - 1);
+  await page
+    .getByRole("link", { name: "All eyewear", exact: true })
+    .first()
+    .click();
+  await expect(page).toHaveURL(/\/catalog$/);
+  await expect(page.locator("html")).not.toHaveAttribute("data-mode");
+  await expect(page.locator("html")).not.toHaveAttribute(
+    "data-blueprint-theme",
+  );
+  expect(
+    await page.evaluate(() =>
+      document.documentElement.style.getPropertyValue("--blueprint-mix"),
+    ),
+  ).toBe("");
+  expect(errors).toEqual([]);
+});
+
+test("reduced motion cuts straight into and out of blueprint with instant theme changes", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/v2-demo");
+  const stage = await ready(page);
+  for (const angle of [1, 2]) {
+    await page.keyboard.press("ArrowDown");
+    await landed(page, angle);
+  }
+  expect(
+    await page.evaluate(() =>
+      document.documentElement.style.getPropertyValue("--blueprint-mix"),
+    ),
+  ).toBe("1");
+  await page.getByRole("button", { name: "Blue blueprint" }).click();
+  expect(
+    await page.evaluate(() =>
+      getComputedStyle(document.documentElement)
+        .getPropertyValue("--blueprint-fill")
+        .trim(),
+    ),
+  ).toBe("#1e4963");
+  await expect(stage).not.toHaveAttribute("data-moving");
+  await page.keyboard.press("ArrowDown");
+  await landed(page, 3);
+  expect(
+    await page.evaluate(() =>
+      document.documentElement.style.getPropertyValue("--blueprint-mix"),
+    ),
+  ).toBe("0");
+  await page.keyboard.press("ArrowUp");
+  await landed(page, 2);
   expect(errors).toEqual([]);
 });

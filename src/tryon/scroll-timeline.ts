@@ -1,9 +1,9 @@
 import { gsap } from "gsap";
 import { clampPhi, type ScenePose } from "./scroll-poses";
-import { EXPLODE_SHARE } from "./scroll-steps";
+import { EXPLODE_SHARE, BLUEPRINT_SHARE } from "./scroll-steps";
 
-// Each scene state still lands at integer time. The camera and assembly animate
-// in separate linear phases, so a reversed scrub naturally reverses their order.
+// Special states off, camera move, special states on. Reverse seeking mirrors
+// these phases; every scene still lands at its integer time.
 export function populateScrollTimeline(
   timeline: gsap.core.Timeline,
   pose: ScenePose,
@@ -14,20 +14,22 @@ export function populateScrollTimeline(
   poses.forEach((next, index) => {
     if (index === 0) return;
     const previous = poses[index - 1];
-    const { explode, ...orbit } = next;
-    const split = previous.explode !== explode;
-    if (split && previous.explode) {
-      timeline.to(pose, { explode: 0, duration: EXPLODE_SHARE, ease: "none" });
-    }
-    timeline.to(pose, {
-      ...orbit,
-      phi: clampPhi(next.phi),
-      duration: split ? 1 - EXPLODE_SHARE : 1,
-      ease: "none",
-    });
-    if (split && explode) {
-      timeline.to(pose, { explode, duration: EXPLODE_SHARE, ease: "none" });
-    }
+    const { explode, blueprint, ...orbit } = next;
+    const explodeChanges = previous.explode !== explode;
+    const blueprintChanges = previous.blueprint !== blueprint;
+    const add = (values: object, duration: number) =>
+      timeline.to(pose, { ...values, duration, ease: "none" });
+    if (blueprintChanges && previous.blueprint)
+      add({ blueprint: 0 }, BLUEPRINT_SHARE);
+    if (explodeChanges && previous.explode) add({ explode: 0 }, EXPLODE_SHARE);
+    add(
+      { ...orbit, phi: clampPhi(next.phi) },
+      1 -
+        (explodeChanges ? EXPLODE_SHARE : 0) -
+        (blueprintChanges ? BLUEPRINT_SHARE : 0),
+    );
+    if (explodeChanges && explode) add({ explode }, EXPLODE_SHARE);
+    if (blueprintChanges && blueprint) add({ blueprint }, BLUEPRINT_SHARE);
   });
   return timeline;
 }
