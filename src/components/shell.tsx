@@ -17,6 +17,7 @@ const NAV = [
   ["/guide", "The lens guide"],
   ["/about", "Our world"],
   ["/try-on", "3D Demo"],
+  ["/v2-demo", "FORMA V2 DEMO"],
 ] as const;
 const TITLES: Record<string, string> = {
   catalog: "The collection",
@@ -30,6 +31,7 @@ const TITLES: Record<string, string> = {
   help: "Help",
   legal: "The small print",
   "try-on": "3D Demo",
+  "v2-demo": "FORMA V2 Demo",
 };
 export const Wordmark = () => (
   <Link className="wordmark" to="/" aria-label="FORMA home">
@@ -58,16 +60,17 @@ export function Shell() {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [location.pathname]);
   const here = location.pathname + location.search;
+  // The V2 demo is one full-screen scroll animation: the header floats over it
+  // and there is no footer to scroll into.
+  const immersive = location.pathname === "/v2-demo";
   return (
     <>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <div className="announcement">
-        <span>Considered design. Everyday perspective.</span>
-        <span>Delivery options at checkout</span>
-      </div>
-      <header className="site-header">
+      <header
+        className={`site-header${immersive ? " site-header-floating" : ""}`}
+      >
         <div className="header-main">
           <div className="header-left">
             <button
@@ -138,7 +141,7 @@ export function Shell() {
       >
         <Outlet />
       </main>
-      <Footer />
+      {!immersive && <Footer />}
       <CompareBar />
       <MenuDrawer />
       <SearchDialog

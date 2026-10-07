@@ -39,6 +39,8 @@ Unit tests cover adapter translation, named options, server lens prices, neutral
 
 The browser journey exercises guest filtering/configuration, device saved frames, signup/cart merge, quote-based checkout with a prescription/coupon/address/demo card, delivery, reviews, support, logout/login and the try-on picker without camera access. `npm run build` produces `dist/client`; there is no Worker bundle or Prisma generation in this repository. `scripts/tryon-visual-check.mjs` uses the dev storefront on 4175.
 
+`/v2-demo` previews The Ellis in a full-height stage pinned beneath the measured sticky header. Scroll moves only the camera through side three-quarter, top, hinge detail and front poses. Reduced motion cuts between still poses. The pose table and scroll length live in `src/tryon/scroll-poses.ts`; both display viewers share `src/tryon/studio.ts`. GSAP and Three.js stay lazy. With `CAPTURE_SCREENSHOTS=1 npm run test:e2e`, the scroll test saves four stage captures and product-preset comparison captures to `/tmp/forma-v2-*.png`.
+
 ## Shopping behavior
 
 - Catalog queries are server pages of six, with category, shape/material specs, fit options, price, stock, sale and sort filters. Search matches frame name or brand. Home/try-on queries and the product mapping cache are bounded; detail, recent and compare load products by ID or slug.

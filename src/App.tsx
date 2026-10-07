@@ -50,6 +50,9 @@ const Legal = lazy(() =>
 const TryOn = lazy(() =>
   import("@/pages/try-on").then((m) => ({ default: m.TryOn })),
 );
+const V2Demo = lazy(() =>
+  import("@/pages/v2-demo").then((m) => ({ default: m.V2Demo })),
+);
 const Mark = () => (
   <span className="wordmark">
     FORMA<span className="wordmark-dot">®</span>
@@ -175,6 +178,7 @@ export function App() {
               />
               <Route path="/legal" element={<Legal />} />
               <Route path="/try-on" element={<TryOn />} />
+              <Route path="/v2-demo" element={<V2Demo />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

@@ -15,7 +15,7 @@ const output = resolve(".sites-runtime/viewer-tests.mjs");
 await build({
   stdin: {
     contents:
-      "export * from './viewer';export * from './glasses';export * from './resources';",
+      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';",
     resolveDir: resolve("src/tryon"),
   },
   outfile: output,
@@ -48,6 +48,15 @@ const {
   VIEWER_FOV,
   VIEWER_FIT_MARGIN,
   VIEWER_ROTATION_STEP,
+  DIRECTIONS,
+  createScrollViewer,
+  resolveScrollPoses,
+  populateScrollTimeline,
+  clampPhi,
+  holdStart,
+  stillPoseIndex,
+  HOLD_DURATION,
+  TIMELINE_DURATION,
 } = await import(pathToFileURL(output));
 after(() => rm(output, { force: true }));
 const product = (overrides = {}) => ({
@@ -742,4 +751,163 @@ test("Ellis and Felix expose a 3D option; galleries start with photos and preser
   } finally {
     await rm(componentOutput, { force: true });
   }
+});
+
+test("scroll poses match product presets and the centred hinge focus", () => {
+  const h = devices(),
+    viewer = h.start(),
+    model = buildDisplayGlasses(product(), 0);
+  viewer.setObject(model);
+  const poses = resolveScrollPoses(10, 600 / 570, (name) =>
+    model.getObjectByName(name)?.getWorldPosition(new THREE.Vector3()),
+  );
+  const direction = (pose) =>
+    new THREE.Vector3().setFromSpherical(
+      new THREE.Spherical(1, pose.phi, pose.theta),
+    );
+  // The top direction is 0.0199973 rad from the pole; both viewers clamp it to 0.02.
+  const top = new THREE.Spherical().setFromVector3(DIRECTIONS.top);
+  top.radius = 1;
+  top.phi = clampPhi(top.phi);
+  assert.ok(
+    direction(poses[2]).distanceTo(new THREE.Vector3().setFromSpherical(top)) <
+      1e-12,
+  );
+  assert.ok(
+    direction(poses[4]).distanceTo(DIRECTIONS.front.clone().normalize()) <
+      1e-12,
+  );
+  assert.ok(
+    direction(poses[3]).distanceTo(
+      new THREE.Vector3(1, 0.55, 1.2).normalize(),
+    ) < 1e-12,
+  );
+  viewer.focus("detail.hinge.right");
+  h.flush();
+  const camera = h.renderers[0].camera;
+  const anchor = model
+    .getObjectByName("detail.hinge.right")
+    .getWorldPosition(new THREE.Vector3());
+  assert.deepEqual(
+    [poses[3].targetX, poses[3].targetY, poses[3].targetZ],
+    anchor.toArray(),
+  );
+  const expected = resolveScrollPoses(
+    new THREE.Box3().setFromObject(model).getBoundingSphere(new THREE.Sphere())
+      .radius,
+    camera.aspect,
+    () => anchor,
+  )[3];
+  const actual = camera.position.clone().sub(anchor);
+  assert.ok(Math.abs(actual.length() - expected.distance) < 1e-9);
+  assert.ok(actual.normalize().distanceTo(direction(expected)) < 1e-9);
+  viewer.dispose();
+});
+
+test("one GSAP orbit timeline holds every pose at both boundaries and never crosses a pole", async () => {
+  const { gsap } = await import("gsap");
+  const poses = resolveScrollPoses(10, 1, () => ({ x: 6, y: 1, z: 5 }));
+  const pose = { ...poses[0] };
+  const timeline = populateScrollTimeline(
+    gsap.timeline({ paused: true }),
+    pose,
+    poses,
+  );
+  assert.ok(Math.abs(timeline.duration() - TIMELINE_DURATION) < 1e-9);
+  // GSAP rounds numeric tween values to six decimal places.
+  const equals = (expected) =>
+    Object.entries(expected).forEach(([key, value]) =>
+      assert.ok(Math.abs(pose[key] - value) < 1e-6, key),
+    );
+  for (let index = 0; index < poses.length; index++) {
+    for (const time of [holdStart(index), holdStart(index) + HOLD_DURATION]) {
+      timeline.time(time, false);
+      equals(poses[index]);
+    }
+    assert.equal(stillPoseIndex(holdStart(index) + HOLD_DURATION / 2), index);
+  }
+  for (let time = TIMELINE_DURATION; time >= 0; time -= 0.01) {
+    timeline.time(time, false);
+    assert.ok(pose.phi >= 0.02 - 1e-6 && pose.phi <= Math.PI - 0.02);
+    assert.ok(
+      pose.theta >= poses[1].theta - 1e-6 &&
+        pose.theta <= poses[3].theta + 1e-6,
+    );
+  }
+  // An invalid future pose is clamped in both table resolution and camera placement.
+  assert.equal(clampPhi(-10), 0.02);
+  assert.equal(clampPhi(10), Math.PI - 0.02);
+  timeline.kill();
+});
+
+test("scroll viewer renders on demand, fits on resize and releases resources on context loss", () => {
+  const h = devices();
+  let viewer;
+  const resolvePoses = () =>
+    resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor);
+  viewer = createScrollViewer({
+    canvas: h.canvas,
+    onError: () => h.errors.push("lost"),
+    onResize: () => viewer.setPose(resolvePoses()[0]),
+  });
+  const model = buildDisplayGlasses(product(), 0);
+  const counts = resources(model).map((resource) => {
+    const counter = { n: 0 };
+    resource.addEventListener("dispose", () => counter.n++);
+    return counter;
+  });
+  viewer.setObject(model);
+  const transforms = [];
+  model.traverse((node) =>
+    transforms.push([
+      node,
+      node.position.clone(),
+      node.quaternion.clone(),
+      node.scale.clone(),
+    ]),
+  );
+  const poses = resolvePoses();
+  viewer.setPose(poses[0]);
+  const renderer = h.renderers[0];
+  assert.equal(h.callbacks.size, 0, "no animation frame loop");
+  assert.equal(
+    h.canvas.listeners.get("pointerdown")?.size ?? 0,
+    0,
+    "no orbit input",
+  );
+  const distance = renderer.camera.position.length();
+  for (const pose of poses) viewer.setPose(pose);
+  for (const [node, position, quaternion, scale] of transforms) {
+    assert.ok(node.position.equals(position));
+    assert.ok(node.quaternion.equals(quaternion));
+    assert.ok(node.scale.equals(scale));
+  }
+  viewer.setPose({ ...poses[1], phi: -100 });
+  assert.ok(
+    Math.abs(
+      new THREE.Spherical().setFromVector3(renderer.camera.position).phi - 0.02,
+    ) < 1e-9,
+  );
+  h.canvas.clientWidth = 280;
+  h.canvas.clientHeight = 500;
+  h.resize();
+  assert.ok(renderer.camera.position.length() > distance);
+  assert.deepEqual(renderer.size, [280, 500]);
+  h.doc.hidden = true;
+  const renders = renderer.renders;
+  viewer.setPose(resolvePoses()[3]);
+  assert.equal(renderer.renders, renders);
+  h.doc.hidden = false;
+  h.event(h.doc, "visibilitychange");
+  assert.equal(renderer.renders, renders + 1);
+  h.event(h.canvas, "webglcontextlost");
+  assert.deepEqual(h.errors, ["lost"]);
+  assert.ok(renderer.disposed && renderer.cleared);
+  assert.ok(counts.every((counter) => counter.n === 1));
+  assert.equal(h.environment.disposals, 1);
+  assert.ok(h.observerDisconnected);
+  assert.equal(h.canvas.count(), 0);
+  assert.equal(h.doc.count(), 0);
+  viewer.dispose();
+  assert.equal(h.environment.disposals, 1);
 });
