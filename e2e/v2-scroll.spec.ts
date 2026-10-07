@@ -339,6 +339,24 @@ test("missing Ellis keeps the collection fallback", async ({ page }) => {
   await expect(page.locator(".pin-spacer")).toHaveCount(0);
 });
 
+test("server down shows only the V2 scroll, without the shell", async ({
+  page,
+}) => {
+  await page.route("**/api/**", (route) =>
+    route.fulfill({ status: 502, body: "" }),
+  );
+  await page.goto("/catalog");
+  const stage = await ready(page);
+  await expect(page.locator(".site-header")).toHaveCount(0);
+  await expect(page.locator("footer")).toHaveCount(0);
+  await expect(page.getByText("We couldn’t open the store")).toHaveCount(0);
+  await expect(page).toHaveTitle("FORMA V2 Demo — FORMA");
+  expect((await stage.boundingBox())!.y).toBe(0);
+  await page.mouse.move(900, 600);
+  await page.mouse.wheel(0, 100);
+  await landed(page, 1);
+});
+
 test("real CDP touch drag holds a scrub then lands on release; header touch remains a link", async ({
   browser,
 }) => {

@@ -53,6 +53,9 @@ const TryOn = lazy(() =>
 const V2Demo = lazy(() =>
   import("@/pages/v2-demo").then((m) => ({ default: m.V2Demo })),
 );
+const OfflineV2Demo = lazy(() =>
+  import("@/pages/v2-demo").then((m) => ({ default: m.OfflineV2Demo })),
+);
 const Mark = () => (
   <span className="wordmark">
     FORMA<span className="wordmark-dot">®</span>
@@ -89,6 +92,9 @@ export function App() {
   useEffect(() => {
     void init();
   }, [init]);
+  useEffect(() => {
+    if (error) console.warn("FORMA is offline, showing the V2 demo:", error);
+  }, [error]);
   // Agent tools (and zod) load only in browsers that expose WebMCP.
   useEffect(() => {
     if (!ready || !("modelContext" in document)) return;
@@ -184,14 +190,10 @@ export function App() {
           </Routes>
         </Suspense>
       ) : error ? (
-        <div className="startup-state">
-          <Mark />
-          <h1>We couldn’t open the store</h1>
-          <p>{error}</p>
-          <button className="button" onClick={() => void init()}>
-            Try again
-          </button>
-        </div>
+        // Without the server there is no store to show, only the V2 scroll.
+        <Suspense fallback={null}>
+          <OfflineV2Demo />
+        </Suspense>
       ) : (
         <div className="startup-state">
           <Mark />

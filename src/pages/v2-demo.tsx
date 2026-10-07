@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { gsap } from "gsap";
 import { Observer } from "gsap/Observer";
@@ -24,6 +24,7 @@ import {
   type StepCommand,
   type StepEvent,
 } from "@/tryon/scroll-steps";
+import type { Product } from "@/lib/types";
 import "./v2-demo.css";
 
 gsap.registerPlugin(Observer, useGSAP);
@@ -44,9 +45,67 @@ function blocked(target: EventTarget | null) {
   );
 }
 
+// Enough of The Ellis to draw its reference model when the server is down.
+const OFFLINE_ELLIS: Product = {
+  id: "the-ellis",
+  slug: "the-ellis",
+  name: "The Ellis",
+  category: "optical",
+  brand: "FORMA",
+  description: "",
+  price: 0,
+  originalPrice: 0,
+  stock: 0,
+  sold: 0,
+  rating: 0,
+  image: "",
+  images: [],
+  sizes: [],
+  colors: ["Ink black"],
+  swatches: [{ hex: "#202021", filter: "none" }],
+  shape: "Rectangle",
+  material: "Acetate",
+  dimensions: "",
+  weight: "",
+  tag: "",
+  reviewCount: 0,
+  lenses: [],
+  finishes: [],
+};
+
 export function V2Demo() {
   const product = useProduct("the-ellis");
   const load = useProductList(["the-ellis"]);
+  return (
+    <V2Stage
+      product={product}
+      loading={load.loading}
+      loadError={load.error}
+      withLinks
+    />
+  );
+}
+
+// Shown on its own, without the shell, when the store cannot reach the server.
+export function OfflineV2Demo() {
+  useEffect(() => {
+    document.title = "FORMA V2 Demo — FORMA";
+  }, []);
+  return <V2Stage product={OFFLINE_ELLIS} loading={false} loadError="" />;
+}
+
+function V2Stage({
+  product,
+  loading,
+  loadError,
+  withLinks = false,
+}: {
+  product: Product | undefined;
+  loading: boolean;
+  loadError: string;
+  withLinks?: boolean;
+}) {
+  const load = { loading, error: loadError };
   const stage = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [ready, setReady] = useState(false);
@@ -434,12 +493,14 @@ export function V2Demo() {
           {unavailable ? (
             <>
               <p>The 3D view is unavailable.</p>
-              <Link to="/product/the-ellis">Explore The Ellis</Link>
+              {withLinks && (
+                <Link to="/product/the-ellis">Explore The Ellis</Link>
+              )}
             </>
           ) : empty ? (
             <>
               <p>This frame is unavailable.</p>
-              <Link to="/catalog">Browse the collection</Link>
+              {withLinks && <Link to="/catalog">Browse the collection</Link>}
             </>
           ) : (
             <p>Loading the frame…</p>
