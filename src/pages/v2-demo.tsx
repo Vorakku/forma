@@ -12,6 +12,7 @@ import {
   createScrollSteps,
   acceptsStepInput,
   stepDuration,
+  scrollStepWeights,
   GESTURE_IDLE_MS,
   type StepCommand,
   type StepEvent,
@@ -63,19 +64,29 @@ export function V2Demo() {
         });
         viewer.setObject(buildDisplayGlasses(product, 0));
         const poses = () =>
-          resolveScrollPoses(viewer!.radius, viewer!.aspect, viewer!.getAnchor);
+          resolveScrollPoses(
+            viewer!.radius,
+            viewer!.aspect,
+            viewer!.getAnchor,
+            viewer!.explodedRadius,
+          );
         const header = document.querySelector<HTMLElement>(".site-header");
         const element = stage.current!;
         const last = SCROLL_ANGLES.length - 1;
+        const weights = scrollStepWeights(SCROLL_ANGLES);
         const steps = createScrollSteps(
           SCROLL_ANGLES.length,
           () => window.innerHeight,
+          false,
+          0,
+          weights,
         );
         const pose = { ...poses()[0] };
         let stepTween: gsap.core.Tween | undefined;
         let timeline: gsap.core.Timeline;
         const update = () => {
           viewer!.setPose(pose);
+          element.dataset.explode = String(pose.explode);
           if (header)
             gsap.set(header, {
               autoAlpha: headerOpacity(timeline.time(), last),
@@ -128,7 +139,11 @@ export function V2Demo() {
                     element.dataset.moving = "true";
                     stepTween = gsap.to(timeline, {
                       time: command.angle,
-                      duration: stepDuration(timeline.time(), command.angle),
+                      duration: stepDuration(
+                        timeline.time(),
+                        command.angle,
+                        weights,
+                      ),
                       ease: command.ease,
                       onComplete: () => {
                         stepTween = undefined;
@@ -259,6 +274,7 @@ export function V2Demo() {
           timeline.kill();
           element.removeAttribute("data-moving");
           element.removeAttribute("data-angle");
+          element.removeAttribute("data-explode");
           viewer?.dispose();
         };
       } catch {
@@ -293,7 +309,7 @@ export function V2Demo() {
       <span className="v2-demo-announcement" aria-live="polite">
         {ready &&
           !unavailable &&
-          `Angle ${angle + 1} of ${SCROLL_ANGLES.length}: ${SCROLL_ANGLES[angle].name}`}
+          `Angle ${angle + 1} of ${SCROLL_ANGLES.length}: ${SCROLL_ANGLES[angle].name}${SCROLL_ANGLES[angle].exploded ? ", taken apart" : ""}`}
       </span>
       {(unavailable || empty || !ready) && (
         <div className="v2-demo-state" role="status">

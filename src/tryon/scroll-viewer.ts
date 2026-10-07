@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { createStudio } from "./studio";
+import { createExploder } from "./explode";
+import { EXPLODE_MM } from "./scroll-steps";
 import { clampPhi, type OrbitPose } from "./scroll-poses";
 
 export function createScrollViewer({
@@ -14,6 +16,9 @@ export function createScrollViewer({
   let observer: ResizeObserver | undefined;
   let pose: OrbitPose | undefined;
   let stopped = false;
+  let exploder: ReturnType<typeof createExploder> | undefined;
+  let explodedRadius = 10;
+  const anchors = new Map<string, THREE.Vector3>();
   const studio = createStudio(canvas, () => {
     dispose();
     onError();
@@ -48,6 +53,9 @@ export function createScrollViewer({
     stopped = true;
     observer?.disconnect();
     document.removeEventListener("visibilitychange", visibility);
+    exploder?.set(0);
+    exploder = undefined;
+    anchors.clear();
     studio.dispose();
   }
 
@@ -68,9 +76,36 @@ export function createScrollViewer({
     get aspect() {
       return studio.camera.aspect;
     },
-    setObject: studio.setObject,
-    getAnchor: studio.getAnchor,
-    setPose(next: OrbitPose) {
+    get explodedRadius() {
+      return explodedRadius;
+    },
+    setObject(object: THREE.Group) {
+      exploder?.set(0);
+      const installed = studio.setObject(object);
+      if (installed === false || installed === null) return installed;
+      exploder = createExploder(object, EXPLODE_MM);
+      anchors.clear();
+      object.updateWorldMatrix(true, true);
+      object.traverse((node) => {
+        if (node.name)
+          anchors.set(node.name, node.getWorldPosition(new THREE.Vector3()));
+      });
+      try {
+        exploder.set(1);
+        explodedRadius = new THREE.Box3()
+          .setFromObject(object)
+          .getBoundingSphere(new THREE.Sphere()).radius;
+      } finally {
+        exploder.set(0);
+      }
+      return installed;
+    },
+    getAnchor(name: string) {
+      return anchors.get(name)?.clone();
+    },
+    setPose(next: OrbitPose & { explode?: number }) {
+      if (stopped) return;
+      exploder?.set(next.explode ?? 0);
       pose = { ...next, phi: clampPhi(next.phi) };
       render();
     },

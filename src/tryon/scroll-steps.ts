@@ -7,6 +7,9 @@ export const TAP_PX = 8;
 export const STEP_DURATION = 1.1;
 export const STEP_MIN = 0.3;
 export const STEP_MAX = 2.2;
+export const EXPLODE_MM = 30;
+export const EXPLODE_SHARE = 0.4;
+export const EXPLODE_STEP_WEIGHT = 1.4;
 
 export type StepCommand =
   | { type: "scrubTo"; time: number }
@@ -74,11 +77,28 @@ type Gesture = {
   consumed: boolean;
 };
 
-export function stepDuration(from: number, to: number) {
-  return Math.max(
-    STEP_MIN,
-    Math.min(STEP_MAX, Math.abs(to - from) * STEP_DURATION),
-  );
+export function scrollStepWeights(states: readonly { exploded: boolean }[]) {
+  return states
+    .slice(1)
+    .map((state, index) =>
+      state.exploded !== states[index].exploded ? EXPLODE_STEP_WEIGHT : 1,
+    );
+}
+
+export function stepDuration(
+  from: number,
+  to: number,
+  weights: readonly number[] = [],
+) {
+  const start = Math.min(from, to);
+  const end = Math.max(from, to);
+  let distance = 0;
+  for (let index = Math.floor(start); index < end; index++) {
+    distance +=
+      (Math.min(end, index + 1) - Math.max(start, index)) *
+      (weights[index] ?? 1);
+  }
+  return Math.max(STEP_MIN, Math.min(STEP_MAX, distance * STEP_DURATION));
 }
 
 export function createScrollSteps(
@@ -86,6 +106,7 @@ export function createScrollSteps(
   viewportHeight: () => number,
   reduced = false,
   initialAngle = 0,
+  weights: readonly number[] = [],
 ) {
   const lastAngle = Math.max(0, angleCount - 1);
   const clamp = (value: number) => Math.max(0, Math.min(lastAngle, value));
@@ -184,7 +205,10 @@ export function createScrollSteps(
       Math.min(
         Math.max(gesture.base, gesture.neighbour),
         gesture.origin +
-          gesture.travel / (SCRUB_PX_PER_ANGLE * viewportHeight()),
+          gesture.travel /
+            (SCRUB_PX_PER_ANGLE *
+              viewportHeight() *
+              (weights[Math.min(gesture.base, gesture.neighbour)] ?? 1)),
       ),
     );
     return next === time ? [] : [{ type: "scrubTo", time: next }];

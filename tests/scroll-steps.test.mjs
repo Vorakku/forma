@@ -13,8 +13,15 @@ await build({
   format: "esm",
   platform: "node",
 });
-const { createScrollSteps, stepDuration, GESTURE_IDLE_MS, STEP_MIN, STEP_MAX } =
-  await import(pathToFileURL(output));
+const {
+  createScrollSteps,
+  stepDuration,
+  scrollStepWeights,
+  EXPLODE_STEP_WEIGHT,
+  GESTURE_IDLE_MS,
+  STEP_MIN,
+  STEP_MAX,
+} = await import(pathToFileURL(output));
 after(() => rm(output, { force: true }));
 
 function harness(count = 5, reduced = false, angle = 0) {
@@ -217,4 +224,53 @@ test("a scrub interrupting a step starts at the current camera time without a ju
   reverse.send("touchMove", 220, { deltaY: -100 });
   assert.ok(Math.abs(reverse.time - 0.5) < 1e-9);
   assert.deepEqual(reverse.send("touchEnd", 400), animate(0, "power2.out"));
+});
+
+test("split step weights scale full/partial/reverse durations and scrub distance without changing gesture decisions", () => {
+  const states = [
+    { exploded: false },
+    { exploded: true },
+    { exploded: false },
+    { exploded: false },
+  ];
+  const weights = scrollStepWeights(states);
+  assert.deepEqual(weights, [EXPLODE_STEP_WEIGHT, EXPLODE_STEP_WEIGHT, 1]);
+  assert.ok(Math.abs(stepDuration(0, 1, weights) - 1.54) < 1e-12);
+  assert.ok(Math.abs(stepDuration(2, 1, weights) - 1.54) < 1e-12);
+  assert.ok(Math.abs(stepDuration(0.8, 1.2, weights) - 0.616) < 1e-12);
+  assert.equal(stepDuration(0, 3, weights), STEP_MAX);
+  assert.equal(stepDuration(0.99, 1, weights), STEP_MIN);
+  for (const [start, delta, expected] of [
+    [0, 70, 0.1],
+    [1, 70, 1.1],
+    [1, -70, 0.9],
+    [2, -70, 1.9],
+    [2, 70, 2.14],
+  ]) {
+    const steps = createScrollSteps(
+      states.length,
+      () => 1000,
+      false,
+      start,
+      weights,
+    );
+    steps.handle({ type: "touchStart", at: 0, time: start });
+    const [command] = steps.handle({
+      type: "touchMove",
+      at: 200,
+      time: start,
+      deltaY: delta,
+    });
+    assert.equal(command.type, "scrubTo");
+    assert.ok(Math.abs(command.time - expected) < 1e-12);
+  }
+  const steps = createScrollSteps(states.length, () => 1000, false, 0, weights);
+  assert.deepEqual(
+    steps.handle({ type: "wheel", at: 0, time: 0, deltaY: 100 }),
+    animate(1),
+  );
+  assert.deepEqual(
+    steps.handle({ type: "wheel", at: 50, time: 0.2, deltaY: 100 }),
+    [],
+  );
 });

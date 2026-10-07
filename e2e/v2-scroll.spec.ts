@@ -24,8 +24,12 @@ async function landed(page: Page, angle: number) {
     timeout: 30_000,
   });
   await expect(stage).not.toHaveAttribute("data-moving");
+  await expect(stage).toHaveAttribute(
+    "data-explode",
+    SCROLL_ANGLES[angle].exploded ? "1" : "0",
+  );
   await expect(stage.locator('[aria-live="polite"]')).toHaveText(
-    `Angle ${angle + 1} of ${SCROLL_ANGLES.length}: ${SCROLL_ANGLES[angle].name}`,
+    `Angle ${angle + 1} of ${SCROLL_ANGLES.length}: ${SCROLL_ANGLES[angle].name}${SCROLL_ANGLES[angle].exploded ? ", taken apart" : ""}`,
   );
 }
 async function capture(page: Page, angle: number) {
@@ -69,6 +73,8 @@ test("cold arrival, one notch/burst per angle, integer landings, keys and naviga
   await landed(page, 1);
   await expect(header).toBeHidden();
   captures.push(await capture(page, 1));
+  if (process.env.CAPTURE_SCREENSHOTS === "1")
+    await stage.screenshot({ path: "/tmp/forma-v2-angle-1-exploded.png" });
   for (let index = 2; index < SCROLL_ANGLES.length; index++) {
     // All ten belong to one gesture, including events during the step tween.
     for (let notch = 0; notch < 10; notch++) await page.mouse.wheel(0, 100);
@@ -354,4 +360,27 @@ test("real CDP touch drag holds a scrub then lands on release; header touch rema
   } finally {
     await context.close();
   }
+});
+
+test("assembly steps 0 → 1 → 2 → 1 → 0 in both directions without errors", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await page.goto("/v2-demo");
+  await ready(page);
+  await page.mouse.move(900, 600);
+  for (const [delta, angle] of [
+    [100, 1],
+    [100, 2],
+    [-100, 1],
+    [-100, 0],
+  ]) {
+    await page.mouse.wheel(0, delta);
+    await landed(page, angle);
+  }
+  expect(errors).toEqual([]);
 });

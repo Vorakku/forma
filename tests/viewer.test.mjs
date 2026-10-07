@@ -15,7 +15,7 @@ const output = resolve(".sites-runtime/viewer-tests.mjs");
 await build({
   stdin: {
     contents:
-      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';",
+      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './explode';export * from './scroll-steps';",
     resolveDir: resolve("src/tryon"),
   },
   outfile: output,
@@ -54,6 +54,9 @@ const {
   populateScrollTimeline,
   clampPhi,
   SCROLL_ANGLES,
+  createExploder,
+  EXPLODE_MM,
+  EXPLODE_SHARE,
 } = await import(pathToFileURL(output));
 after(() => rm(output, { force: true }));
 const product = (overrides = {}) => ({
@@ -819,7 +822,10 @@ test("one linear GSAP orbit timeline matches integer angles and never crosses a 
   for (let index = 0; index < poses.length; index++) {
     timeline.time(index, false);
     equals(poses[index]);
-    if (index < poses.length - 1) {
+    if (
+      index < poses.length - 1 &&
+      poses[index].explode === poses[index + 1].explode
+    ) {
       timeline.time(index + 0.5, false);
       equals(
         Object.fromEntries(
@@ -864,6 +870,229 @@ test("a sixth table angle extends the integer timeline without changing the driv
   for (const [key, value] of Object.entries(poses.at(-1)))
     assert.ok(Math.abs(pose[key] - value) < 1e-6);
   timeline.kill();
+});
+
+test("explode offsets match the reference, do not accumulate and carry nested parts", () => {
+  const model = buildDisplayGlasses(product(), 0);
+  const exploder = createExploder(model, EXPLODE_MM);
+  const offsets = [
+    ["front_frame", 0, 0.3],
+    ["lens_L", -0.3, 1.35],
+    ["lens_R", 0.3, 1.35],
+    ["temple_pivot_L", -1, -0.4],
+    ["temple_pivot_R", 1, -0.4],
+  ];
+  const transforms = [];
+  model.traverse((node) =>
+    transforms.push([
+      node,
+      node.position.clone(),
+      node.quaternion.clone(),
+      node.scale.clone(),
+    ]),
+  );
+  const children = [
+    "front_rivet_R",
+    "detail.hinge.right",
+    "temple_rivet_L",
+    "temple_R",
+  ].map((name) => {
+    const node = model.getObjectByName(name);
+    return [
+      node,
+      node.position.clone(),
+      node.getWorldPosition(new THREE.Vector3()),
+    ];
+  });
+  for (const amount of [1, 1, 0.4, 0.8, 0]) {
+    exploder.set(amount);
+    for (const [name, x, z] of offsets) {
+      const [node, base] = transforms.find(([node]) => node.name === name);
+      const expected = base
+        .clone()
+        .add(
+          new THREE.Vector3(
+            x * EXPLODE_MM * 0.001 * amount,
+            0,
+            z * EXPLODE_MM * 0.001 * amount,
+          ),
+        );
+      assert.ok(node.position.distanceTo(expected) < 1e-15, name);
+    }
+    for (const [node, local, originalWorld] of children) {
+      assert.deepEqual(
+        node.position,
+        local,
+        "child's local transform stays unchanged",
+      );
+      const parentOffset = offsets.find(([name]) => name === node.parent.name);
+      const expectedWorld = originalWorld
+        .clone()
+        .add(
+          new THREE.Vector3(
+            parentOffset[1] * EXPLODE_MM * 0.1 * amount,
+            0,
+            parentOffset[2] * EXPLODE_MM * 0.1 * amount,
+          ),
+        );
+      assert.ok(
+        node.getWorldPosition(new THREE.Vector3()).distanceTo(expectedWorld) <
+          1e-12,
+        node.name,
+      );
+    }
+  }
+  for (const [node, position, quaternion, scale] of transforms) {
+    assert.deepEqual(node.position, position);
+    assert.deepEqual(node.quaternion.toArray(), quaternion.toArray());
+    assert.deepEqual(node.scale, scale);
+  }
+  disposeObject(model);
+});
+
+test("frames with a missing reference assembly make explode a silent no-op", () => {
+  const model = buildDisplayGlasses(
+    product({ slug: "the-remy", shape: "Round" }),
+    0,
+  );
+  const positions = [];
+  model.traverse((node) => positions.push([node, node.position.clone()]));
+  const exploder = createExploder(model, EXPLODE_MM);
+  exploder.set(1);
+  exploder.set(0.3);
+  exploder.set(0);
+  for (const [node, base] of positions) assert.deepEqual(node.position, base);
+  const partial = new THREE.Group();
+  const front = new THREE.Group();
+  front.name = "front_frame";
+  partial.add(front);
+  createExploder(partial, EXPLODE_MM).set(1);
+  assert.deepEqual(front.position.toArray(), [0, 0, 0]);
+  disposeObject(model);
+});
+
+test("split timeline parks the camera whenever exploded, in both directions and on resize rebuild", async () => {
+  const { gsap } = await import("gsap");
+  const poses = resolveScrollPoses(10, 1, () => ({ x: 6, y: 1, z: 5 }), 15);
+  const pose = { ...poses[0] };
+  const timeline = populateScrollTimeline(
+    gsap.timeline({ paused: true }),
+    pose,
+    poses,
+  );
+  const equalsOrbit = (expected) => {
+    for (const key of Object.keys(expected).filter((key) => key !== "explode"))
+      assert.ok(Math.abs(pose[key] - expected[key]) < 1e-6, key);
+  };
+  for (const direction of [1, -1]) {
+    for (let index = 0; index <= 400; index++) {
+      const time = direction === 1 ? index / 100 : (400 - index) / 100;
+      timeline.time(time, false);
+      if (pose.explode > 0) equalsOrbit(poses[1]);
+      if (time <= 1 - EXPLODE_SHARE || time >= 1 + EXPLODE_SHARE)
+        assert.equal(pose.explode, 0);
+    }
+  }
+  for (const [time, amount] of [
+    [0, 0],
+    [1, 1],
+    [2, 0],
+    [0.8, 0.5],
+    [1.2, 0.5],
+  ]) {
+    timeline.time(time, false);
+    assert.ok(Math.abs(pose.explode - amount) < 1e-6);
+  }
+  // These samples distinguish camera-then-explode from assemble-then-camera.
+  timeline.time(0.3, false);
+  assert.equal(pose.explode, 0);
+  assert.notEqual(pose.theta, poses[1].theta);
+  timeline.time(0.8, false);
+  equalsOrbit(poses[1]);
+  assert.equal(pose.explode, 0.5);
+  timeline.time(1.2, false);
+  equalsOrbit(poses[1]);
+  assert.equal(pose.explode, 0.5);
+  timeline.time(1.7, false);
+  assert.equal(pose.explode, 0);
+  assert.notEqual(pose.theta, poses[1].theta);
+  timeline.time(0.8, false);
+  const rebuilt = resolveScrollPoses(
+    10,
+    375 / 812,
+    () => ({ x: 6, y: 1, z: 5 }),
+    15,
+  );
+  populateScrollTimeline(timeline, pose, rebuilt).time(0.8, true);
+  equalsOrbit(rebuilt[1]);
+  assert.equal(pose.explode, 0.5);
+  timeline.kill();
+});
+
+test("exploded fit contains every part at desktop/mobile sizes; assembled anchors and other fits stay fixed", () => {
+  const h = devices({ width: 1808, height: 1018 });
+  const viewer = createScrollViewer({
+    canvas: h.canvas,
+    onError: () => assert.fail("unexpected failure"),
+  });
+  const model = buildDisplayGlasses(product(), 0);
+  viewer.setObject(model);
+  const hinge = viewer.getAnchor("detail.hinge.right");
+  assert.ok(viewer.explodedRadius > viewer.radius);
+  for (const [width, height] of [
+    [1808, 1018],
+    [375, 812],
+  ]) {
+    h.canvas.clientWidth = width;
+    h.canvas.clientHeight = height;
+    h.resize();
+    const poses = resolveScrollPoses(
+      viewer.radius,
+      viewer.aspect,
+      viewer.getAnchor,
+      viewer.explodedRadius,
+    );
+    const assembledPoses = resolveScrollPoses(
+      viewer.radius,
+      viewer.aspect,
+      viewer.getAnchor,
+    );
+    assert.equal(
+      poses[1].distance,
+      fitDistance(viewer.explodedRadius, viewer.aspect),
+    );
+    for (const index of [0, 2, 3, 4])
+      assert.deepEqual(poses[index], assembledPoses[index]);
+    for (const explode of [0, 0.25, 0.5, 0.75, 1]) {
+      viewer.setPose({ ...poses[1], explode });
+      assert.deepEqual(viewer.getAnchor("detail.hinge.right"), hinge);
+      assert.deepEqual(
+        [poses[3].targetX, poses[3].targetY, poses[3].targetZ],
+        hinge.toArray(),
+      );
+      const camera = h.renderers[0].camera;
+      model.traverse((node) => {
+        if (!node.isMesh) return;
+        node.geometry.computeBoundingBox();
+        const box = node.geometry.boundingBox;
+        for (const x of [box.min.x, box.max.x])
+          for (const y of [box.min.y, box.max.y])
+            for (const z of [box.min.z, box.max.z]) {
+              const projected = new THREE.Vector3(x, y, z)
+                .applyMatrix4(node.matrixWorld)
+                .project(camera);
+              assert.ok(
+                Math.abs(projected.x) <= 1 &&
+                  Math.abs(projected.y) <= 1 &&
+                  Math.abs(projected.z) <= 1,
+                `${width}×${height} ${node.name}: ${projected.toArray()}`,
+              );
+            }
+      });
+    }
+  }
+  viewer.dispose();
+  assert.equal(h.callbacks.size, 0);
 });
 
 test("scroll viewer renders on demand, fits on resize and releases resources on context loss", () => {
