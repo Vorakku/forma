@@ -311,7 +311,7 @@ test("real gesture → step animation → timeline projection guard fails on 97e
     );
   }
   assert.ok(
-    Math.abs(fixtures[0].budget.steps[0].phases[0].seconds - 1.9) < 0.01,
+    Math.abs(fixtures[0].budget.steps[0].phases[0].seconds - 1.237) < 0.01,
   );
 });
 

@@ -5,14 +5,14 @@ export const FLICK_PX = 40;
 export const TAP_PX = 8;
 export const EXPLODE_MM = 30;
 export const EXPLODE_STAGGER = 0.35;
-export const CAMERA_SPEED = 0.186463; // shorter stage sides / second; calibrated by the projection guard
+export const CAMERA_SPEED = 0.326; // shorter stage sides / second; calibrated by the projection guard
 export const PATH_SAMPLES = 256;
 export const SURFACE_POINTS = 300;
 export const VISIBLE_MARGIN = 0.1;
 export const RAMP_S = 0.35;
 export const OVERLAP_S = 0.35;
-export const EXPLODE_S = 1.2;
-export const BLUEPRINT_S = 1.2;
+export const EXPLODE_S = 0.7;
+export const BLUEPRINT_S = 0.7;
 export const SCRUB_PX_PER_S = 0.25; // × viewport height
 export const JUMP_SPEEDUP = 2;
 
