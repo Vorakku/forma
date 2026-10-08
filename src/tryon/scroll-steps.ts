@@ -4,6 +4,7 @@ export const FLICK_WINDOW_MS = 100;
 export const FLICK_PX = 40;
 export const TAP_PX = 8;
 export const EXPLODE_MM = 30;
+export const EXPLODE_STAGGER = 0.35;
 export const CAMERA_SPEED = 0.186463; // shorter stage sides / second; calibrated by the projection guard
 export const PATH_SAMPLES = 256;
 export const SURFACE_POINTS = 300;

@@ -56,6 +56,7 @@ const {
   SCROLL_ANGLES,
   createExploder,
   EXPLODE_MM,
+  EXPLODE_STAGGER,
   buildMotionBudget,
   interpolateOrbit,
   pathProgress,
@@ -932,7 +933,12 @@ test("explode offsets match the reference, do not accumulate and carry nested pa
       node.getWorldPosition(new THREE.Vector3()),
     ];
   });
-  for (const amount of [1, 1, 0.4, 0.8, 0]) {
+  const progress = (name, amount) => {
+    const start = name.startsWith("temple_pivot") ? EXPLODE_STAGGER : 0;
+    const p = Math.max(0, Math.min(1, (amount - start) / (1 - EXPLODE_STAGGER)));
+    return p * p * (3 - 2 * p);
+  };
+  for (const amount of [1, 1, 0.4, 0.8, EXPLODE_STAGGER, 0]) {
     exploder.set(amount);
     for (const [name, x, z] of offsets) {
       const [node, base] = transforms.find(([node]) => node.name === name);
@@ -940,12 +946,17 @@ test("explode offsets match the reference, do not accumulate and carry nested pa
         .clone()
         .add(
           new THREE.Vector3(
-            x * EXPLODE_MM * 0.001 * amount,
+            x * (progress(name, amount) * EXPLODE_MM * 0.001),
             0,
-            z * EXPLODE_MM * 0.001 * amount,
+            z * (progress(name, amount) * EXPLODE_MM * 0.001),
           ),
         );
       assert.ok(node.position.distanceTo(expected) < 1e-15, name);
+      if (amount === 0 || amount === 1) assert.deepEqual(node.position, expected);
+      if (amount === EXPLODE_STAGGER) {
+        if (name.startsWith("temple_pivot")) assert.deepEqual(node.position, base);
+        else assert.ok(node.position.distanceTo(base) > 0, name);
+      }
     }
     for (const [node, local, originalWorld] of children) {
       assert.deepEqual(
@@ -958,9 +969,9 @@ test("explode offsets match the reference, do not accumulate and carry nested pa
         .clone()
         .add(
           new THREE.Vector3(
-            parentOffset[1] * EXPLODE_MM * 0.1 * amount,
+            parentOffset[1] * EXPLODE_MM * 0.1 * progress(parentOffset[0], amount),
             0,
-            parentOffset[2] * EXPLODE_MM * 0.1 * amount,
+            parentOffset[2] * EXPLODE_MM * 0.1 * progress(parentOffset[0], amount),
           ),
         );
       assert.ok(
@@ -970,6 +981,17 @@ test("explode offsets match the reference, do not accumulate and carry nested pa
       );
     }
   }
+  const previous = new Map(offsets.map(([name]) => [name, 0]));
+  for (let sample = 0; sample <= 100; sample++) {
+    exploder.set(sample / 100);
+    for (const [name] of offsets) {
+      const [node, base] = transforms.find(([node]) => node.name === name);
+      const distance = node.position.distanceTo(base);
+      assert.ok(distance >= previous.get(name), `${name} moves monotonically`);
+      previous.set(name, distance);
+    }
+  }
+  exploder.set(0);
   for (const [node, position, quaternion, scale] of transforms) {
     assert.deepEqual(node.position, position);
     assert.deepEqual(node.quaternion.toArray(), quaternion.toArray());
