@@ -6,11 +6,7 @@ import { createBlueprint } from "./blueprint";
 import { createBlueprintRender } from "./blueprint-render";
 import type { BlueprintTokens } from "./blueprint-theme";
 import { VIEWER_MAX_PIXEL_RATIO } from "./studio";
-import { readStudioTone } from "./studio-tone";
-import {
-  buildStudioEnvironment,
-  readStudioEnvironment,
-} from "./studio-environment";
+import { buildStudioEnvironment } from "./studio-environment";
 import { EXPLODE_MM, ENV_FOLLOW } from "./scroll-steps";
 import {
   resolveLight,
@@ -50,12 +46,12 @@ export function createScrollViewer({
       onError();
     },
     disposeBlueprint,
-    () =>
-      buildStudioEnvironment(readStudioEnvironment(window.location.search)),
+    buildStudioEnvironment,
     {
       shadowMapType: THREE.PCFShadowMap,
       shadowRadius: 4,
-      ...readStudioTone(window.location.search),
+      toneMapping: THREE.NeutralToneMapping,
+      toneMappingExposure: 1.0,
     },
   );
   const keyPosition = new THREE.Vector3();

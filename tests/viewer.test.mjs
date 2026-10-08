@@ -139,7 +139,6 @@ function devices({
   height = 570,
   reduced = false,
   failConstructor = false,
-  search = "",
 } = {}) {
   const canvas = new Surface(),
     doc = new Surface(),
@@ -225,7 +224,7 @@ function devices({
     }
   };
   globalThis.viewerHarness = h;
-  globalThis.window = { location: { search }, matchMedia: () => motion, devicePixelRatio: 3 };
+  globalThis.window = { matchMedia: () => motion, devicePixelRatio: 3 };
   globalThis.document = doc;
   globalThis.ResizeObserver = class {
     constructor(callback) {
@@ -1652,61 +1651,35 @@ test("blueprint lines are disposed once when the shared studio fails or loses co
   }
 });
 
-test("V2 builds only the selected procedural environment, falls back to strip and releases every PMREM source resource", () => {
-  for (const [search, variant, panelIntensities] of [
-    ["", "strip", [6, 8, 8, 0.6]],
-    ["?env=strip", "strip", [6, 8, 8, 0.6]],
-    ["?env=soft", "soft", [4, 1.5]],
-    ["?env=window", "window", [5, 3]],
-    ["?env=unknown", "strip", [6, 8, 8, 0.6]],
-  ]) {
-    const h = devices({ search });
-    const viewer = createScrollViewer({
-      canvas: h.canvas,
-      onError: () => assert.fail("unexpected failure"),
-    });
-    assert.equal(h.environmentSources.length, 1);
-    const { scene, sigma, disposals } = h.environmentSources[0];
-    assert.equal(scene.name, "V2 studio: " + variant);
-    assert.equal(sigma, 0.03);
-    assert.ok(disposals.size > 0);
-    assert.ok([...disposals.values()].every((count) => count === 1));
-    const cards = scene.children.filter((node) => node.geometry?.type === "PlaneGeometry" && node.name !== "reflection floor");
-    assert.deepEqual(cards.map((card) => card.material.color.r), panelIntensities);
-    for (const card of cards) {
-      assert.ok(card.material.isMeshBasicMaterial);
-      const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(card.quaternion);
-      assert.ok(normal.dot(card.position.clone().normalize()) < -0.9999, "panel faces capture origin");
-    }
-    const shell = scene.getObjectByName("room");
-    assert.equal(shell.material.side, THREE.BackSide);
-    assert.equal(shell.material.color.r, variant === "strip" ? 0.03 : variant === "soft" ? 0.15 : 0.08);
-    const floor = scene.getObjectByName("reflection floor");
-    assert.equal(floor.material.color.r, variant === "window" ? 0.3 : 0.25);
-    viewer.dispose();
-    assert.equal(h.generatorsDisposed, 1);
-    assert.equal(h.environment.disposals, 1);
-    assert.ok([...disposals.values()].every((count) => count === 1), "source resources are not disposed twice");
-    assert.equal(h.callbacks.size, 0);
+test("V2 builds the strip studio and releases every PMREM source resource", () => {
+  const h = devices();
+  const viewer = createScrollViewer({
+    canvas: h.canvas,
+    onError: () => assert.fail("unexpected failure"),
+  });
+  assert.equal(h.environmentSources.length, 1);
+  const { scene, sigma, disposals } = h.environmentSources[0];
+  assert.equal(scene.name, "V2 studio: strip");
+  assert.equal(sigma, 0.03);
+  assert.ok(disposals.size > 0);
+  assert.ok([...disposals.values()].every((count) => count === 1));
+  const cards = scene.children.filter((node) => node.geometry?.type === "PlaneGeometry" && node.name !== "reflection floor");
+  assert.deepEqual(cards.map((card) => card.material.color.r), [6, 8, 8, 0.6]);
+  for (const card of cards) {
+    assert.ok(card.material.isMeshBasicMaterial);
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(card.quaternion);
+    assert.ok(normal.dot(card.position.clone().normalize()) < -0.9999, "panel faces capture origin");
   }
-  const h = devices({ search: "?env=window" });
-  const viewer = h.start();
-  const source = h.environmentSources[0];
-  assert.equal(source.scene.name, "RoomEnvironment");
-  assert.equal(source.sigma, 0.03);
-  assert.ok([...source.disposals.values()].every((count) => count === 1));
-  viewer.setObject(buildDisplayGlasses(product(), 0));
-  h.flush();
-  const renderer = h.renderers[0];
-  const key = renderer.scene.children.find((node) => node.isDirectionalLight);
-  const hemi = renderer.scene.children.find((node) => node.isHemisphereLight);
-  assert.deepEqual(key.position.toArray(), [-15, 28, 18]);
-  assert.equal(key.intensity, 3);
-  assert.equal(hemi.intensity, 0.8);
-  assert.equal(renderer.scene.environmentIntensity, 1);
-  assert.equal(renderer.scene.environmentRotation.y, 0);
-  assert.equal(renderer.toneMappingExposure, 1.45);
+  const shell = scene.getObjectByName("room");
+  assert.equal(shell.material.side, THREE.BackSide);
+  assert.equal(shell.material.color.r, 0.03);
+  const floor = scene.getObjectByName("reflection floor");
+  assert.equal(floor.material.color.r, 0.25);
   viewer.dispose();
+  assert.equal(h.generatorsDisposed, 1);
+  assert.equal(h.environment.disposals, 1);
+  assert.ok([...disposals.values()].every((count) => count === 1), "source resources are not disposed twice");
+  assert.equal(h.callbacks.size, 0);
 });
 
 test("PMREM conversion failure releases the custom scene, generator and renderer", () => {
@@ -1743,7 +1716,7 @@ test("landed V2 poses apply each row's key, hemisphere, environment and camera-f
     assert.equal(scene.environmentIntensity, light.environment);
     assert.equal(scene.environmentRotation.y, ENV_FOLLOW * pose.theta + THREE.MathUtils.degToRad(light.yaw));
     assert.equal(scene.backgroundRotation.y, 0);
-    assert.equal(renderer.toneMappingExposure, 1.45);
+    assert.equal(renderer.toneMappingExposure, 1.0);
     assert.deepEqual([key.shadow.camera.left, key.shadow.camera.bottom, key.shadow.camera.right, key.shadow.camera.top], [-23, -23, 23, 23]);
   }
   const { light, ...withoutLight } = poses[4];
@@ -1774,7 +1747,7 @@ test("light-only changes invalidate blueprint images and moving keys refresh sha
   assert.equal(renderer.renders - renders, 3);
   assert.equal(scene.environmentRotation.y, ENV_FOLLOW * (pose.theta + 0.4));
   assert.equal(renderer.shadowMap.needsUpdate, false);
-  assert.equal(renderer.toneMappingExposure, 1.45);
+  assert.equal(renderer.toneMappingExposure, 1.0);
   assert.equal(h.callbacks.size, 0);
   // At full blueprint the studio pass is skipped. A key move must remain dirty
   // until the next visible studio image, then subsequent fades can reuse it.
@@ -1796,7 +1769,7 @@ test("V2 shadows use each landed opacity, wider PCF filtering and the two Round 
     viewer.setPose({ ...pose, blueprint: 0 });
     const renderer = h.renderers[0];
     const key = renderer.scene.children.find((node) => node.isDirectionalLight);
-    assert.equal(renderer.scene.getObjectByName("floor").material.opacity, [0.14, 0.12, 0.10, 0.05, 0.14][index]);
+    assert.equal(renderer.scene.getObjectByName("floor").material.opacity, [0.14, 0.06, 0.10, 0.05, 0.14][index]);
     assert.equal(renderer.shadowMap.type, THREE.PCFShadowMap);
     assert.equal(key.shadow.radius, 4);
     assert.deepEqual(key.shadow.mapSize.toArray(), [2048, 2048]);
@@ -1854,14 +1827,23 @@ test("shadow opacity alone invalidates the studio image without recomputing the 
   }
 });
 
-test("shop ignores V2 environment and tone parameters and retains its original floor, shadow and exposure", () => {
-  const h = devices({ search: "?env=window&tone=agx" });
+test("shop retains its original environment, floor, shadow, tone mapping and exposure", () => {
+  const h = devices();
   const viewer = h.start();
   viewer.setObject(buildDisplayGlasses(product(), 0));
   h.flush();
   const renderer = h.renderers[0];
   const key = renderer.scene.children.find((node) => node.isDirectionalLight);
-  assert.equal(h.environmentSources[0].scene.name, "RoomEnvironment");
+  const source = h.environmentSources[0];
+  assert.equal(source.scene.name, "RoomEnvironment");
+  assert.equal(source.sigma, 0.03);
+  assert.ok([...source.disposals.values()].every((count) => count === 1));
+  const hemi = renderer.scene.children.find((node) => node.isHemisphereLight);
+  assert.deepEqual(key.position.toArray(), [-15, 28, 18]);
+  assert.equal(key.intensity, 3);
+  assert.equal(hemi.intensity, 0.8);
+  assert.equal(renderer.scene.environmentIntensity, 1);
+  assert.equal(renderer.scene.environmentRotation.y, 0);
   assert.equal(renderer.scene.getObjectByName("floor").material.opacity, 0.035);
   assert.equal(renderer.shadowMap.type, THREE.PCFShadowMap);
   assert.equal(key.shadow.radius, 1);
@@ -1890,86 +1872,40 @@ function captureToneRenderer(h) {
       if (material)
         this.compositeDraws.push({
           material,
-          operator: material.defines.STUDIO_TONE_MAPPING,
           exposure: material.uniforms.toneMappingExposure.value,
-          version: material.version,
         });
       super.render(scene, camera);
     }
   };
 }
 
-test("V2 tone queries set one fixed exposure and the composite matches the renderer for every variant and fallback", () => {
-  for (const [search, mapping, exposure, operator] of [
-    ["", THREE.ACESFilmicToneMapping, 1.45, "ACESFilmicToneMapping"],
-    ["?tone=aces", THREE.ACESFilmicToneMapping, 1.45, "ACESFilmicToneMapping"],
-    ["?tone=neutral&env=soft", THREE.NeutralToneMapping, 1, "NeutralToneMapping"],
-    ["?tone=agx&env=window", THREE.AgXToneMapping, 1, "AgXToneMapping"],
-    ["?tone=unknown", THREE.ACESFilmicToneMapping, 1.45, "ACESFilmicToneMapping"],
-  ]) {
-    const h = devices({ search });
-    captureToneRenderer(h);
-    const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
-    viewer.setObject(buildDisplayGlasses(product(), 0));
-    const poses = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius);
-    const renderer = h.renderers[0];
-    assert.equal(renderer.toneMapping, mapping);
-    assert.equal(renderer.toneMappingExposure, exposure);
-    viewer.setPose({ ...poses[2], blueprint: 0 });
-    const initialRenders = renderer.renders;
-    for (const mix of [0.2, 0.8, 1, 0]) {
-      viewer.setPose({ ...poses[2], blueprint: mix });
-      assert.equal(renderer.toneMapping, mapping);
-      assert.equal(renderer.toneMappingExposure, exposure);
-    }
-    assert.equal(renderer.renders - initialRenders, 6, "tone selection adds no render passes");
-    assert.equal(renderer.compositeDraws.length, 2);
-    for (const draw of renderer.compositeDraws) {
-      assert.equal(draw.operator, operator);
-      assert.equal(draw.exposure, exposure);
-      assert.equal(draw.material.toneMapped, false, "the composite applies its operator exactly once");
-      assert.match(draw.material.fragmentShader, /a\.rgb = STUDIO_TONE_MAPPING\(a\.rgb \/ max\(a\.a, 0\.00001\)\) \* a\.a/);
-      assert.match(draw.material.fragmentShader, /#include <tonemapping_pars_fragment>/);
-      assert.ok(THREE.ShaderChunk.tonemapping_pars_fragment.includes("vec3 " + draw.operator + "( vec3 color )"));
-    }
-    assert.equal(renderer.compositeDraws[0].version, renderer.compositeDraws[1].version, "a stable operator does not recompile per frame");
-    for (const pose of poses) viewer.setPose(pose);
-    assert.deepEqual(renderer.exposureWrites, [exposure], "motion and fades never write renderer exposure");
-    assert.equal(h.callbacks.size, 0);
-    assert.equal(renderer.getRenderTarget(), null);
-    viewer.dispose();
-  }
-});
-
-test("blueprint composite recompiles when its renderer operator changes and keeps linear cached images", () => {
+test("V2 uses fixed Neutral tone mapping at exposure 1.0 through motion and blueprint fades", () => {
   const h = devices();
   captureToneRenderer(h);
   const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
   viewer.setObject(buildDisplayGlasses(product(), 0));
-  const pose = { ...resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor)[2], blueprint: 0.5 };
-  viewer.setPose(pose);
+  const poses = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius);
   const renderer = h.renderers[0];
-  let version = renderer.compositeDraws.at(-1).version;
-  for (const [mapping, operator] of [
-    [THREE.NeutralToneMapping, "NeutralToneMapping"],
-    [THREE.AgXToneMapping, "AgXToneMapping"],
-    [THREE.ACESFilmicToneMapping, "ACESFilmicToneMapping"],
-  ]) {
-    renderer.toneMapping = mapping;
-    let renders = renderer.renders;
-    viewer.setPose(pose);
-    let draw = renderer.compositeDraws.at(-1);
-    assert.equal(draw.operator, operator);
-    assert.equal(draw.version, version + 1);
-    assert.equal(renderer.renders - renders, 1);
-    version = draw.version;
-    renders = renderer.renders;
-    viewer.setPose(pose);
-    draw = renderer.compositeDraws.at(-1);
-    assert.equal(draw.version, version);
-    assert.equal(renderer.renders - renders, 1);
+  assert.equal(renderer.toneMapping, THREE.NeutralToneMapping);
+  assert.equal(renderer.toneMappingExposure, 1.0);
+  viewer.setPose({ ...poses[2], blueprint: 0 });
+  const initialRenders = renderer.renders;
+  for (const mix of [0.2, 0.8, 1, 0]) {
+    viewer.setPose({ ...poses[2], blueprint: mix });
+    assert.equal(renderer.toneMapping, THREE.NeutralToneMapping);
+    assert.equal(renderer.toneMappingExposure, 1.0);
   }
-  assert.deepEqual(renderer.exposureWrites, [1.45]);
+  assert.equal(renderer.renders - initialRenders, 6, "blueprint fades keep the same render count");
+  assert.equal(renderer.compositeDraws.length, 2);
+  for (const draw of renderer.compositeDraws) {
+    assert.equal(draw.exposure, 1.0);
+    assert.equal(draw.material.toneMapped, false, "the composite applies its operator exactly once");
+    assert.match(draw.material.fragmentShader, /a\.rgb = NeutralToneMapping\(a\.rgb \/ max\(a\.a, 0\.00001\)\) \* a\.a/);
+    assert.match(draw.material.fragmentShader, /#include <tonemapping_pars_fragment>/);
+  }
+  for (const pose of poses) viewer.setPose(pose);
+  assert.deepEqual(renderer.exposureWrites, [1.0], "motion and fades never write renderer exposure");
   assert.equal(h.callbacks.size, 0);
+  assert.equal(renderer.getRenderTarget(), null);
   viewer.dispose();
 });

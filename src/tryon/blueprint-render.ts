@@ -1,19 +1,6 @@
 import * as THREE from "three";
 import type { createBlueprint } from "./blueprint";
 
-function studioToneOperator(toneMapping: THREE.ToneMapping) {
-  switch (toneMapping) {
-    case THREE.ACESFilmicToneMapping:
-      return "ACESFilmicToneMapping";
-    case THREE.NeutralToneMapping:
-      return "NeutralToneMapping";
-    case THREE.AgXToneMapping:
-      return "AgXToneMapping";
-    default:
-      throw new Error("Unsupported V2 studio tone mapping.");
-  }
-}
-
 // Independent depth buffers keep glass/translucency and hidden-line depth tests
 // stable throughout the fade. Mix 0 still uses the studio's original direct path.
 export function createBlueprintRender() {
@@ -29,13 +16,12 @@ export function createBlueprintRender() {
     depthWrite: false,
     blending: THREE.NoBlending,
     toneMapped: false,
-    defines: { STUDIO_TONE_MAPPING: "ACESFilmicToneMapping" },
     premultipliedAlpha: true,
     uniforms: {
       studio: { value: studioTarget.texture },
       blueprint: { value: blueprintTarget.texture },
       mixAmount: { value: 0 },
-      toneMappingExposure: { value: 1.45 },
+      toneMappingExposure: { value: 1.0 },
     },
     vertexShader: `varying vec2 vUv;
       void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
@@ -49,7 +35,8 @@ export function createBlueprintRender() {
         vec4 b = texture2D(blueprint, vUv);
         // Render targets carry premultiplied linear colour. Tone-map the studio
         // just as on its direct path, leaving the flat blueprint tokens alone.
-        a.rgb = STUDIO_TONE_MAPPING(a.rgb / max(a.a, 0.00001)) * a.a;
+        // Must match the scroll viewer renderer's tone mapping.
+        a.rgb = NeutralToneMapping(a.rgb / max(a.a, 0.00001)) * a.a;
         vec4 blended = mix(a, b, mixAmount);
         gl_FragColor = vec4(blended.rgb / max(blended.a, 0.00001), blended.a);
         #include <colorspace_fragment>
@@ -85,13 +72,6 @@ export function createBlueprintRender() {
         if (mix === 1) {
           drawBlueprint();
           return;
-        }
-        // Offscreen studio pixels are linear. Match the direct renderer path
-        // here, and recompile only if the selected operator changes.
-        const operator = studioToneOperator(renderer.toneMapping);
-        if (material.defines.STUDIO_TONE_MAPPING !== operator) {
-          material.defines.STUDIO_TONE_MAPPING = operator;
-          material.needsUpdate = true;
         }
         const size = renderer.getDrawingBufferSize(new THREE.Vector2());
         if (studioTarget.width !== size.x || studioTarget.height !== size.y) {
