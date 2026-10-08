@@ -9,7 +9,11 @@ import { createScrollViewer } from "@/tryon/scroll-viewer";
 import { buildMotionBudget } from "@/tryon/scroll-budget";
 import { animateScrollStep } from "@/tryon/scroll-animation";
 import { populateScrollTimeline } from "@/tryon/scroll-timeline";
-import { resolveScrollPoses, SCROLL_ANGLES } from "@/tryon/scroll-poses";
+import {
+  resolveLight,
+  resolveScrollPoses,
+  SCROLL_ANGLES,
+} from "@/tryon/scroll-poses";
 import {
   readBlueprintTheme,
   saveBlueprintTheme,
@@ -142,6 +146,8 @@ function V2Stage({
         themeTween?.kill();
         clearThemeOverrides();
         root.style.removeProperty("--blueprint-mix");
+        for (const property of ["x", "y", "size", "strength"])
+          stage.current?.style.removeProperty("--pool-" + property);
         root.removeAttribute("data-mode");
         root.removeAttribute("data-blueprint-theme");
         applyTheme.current = () => {};
@@ -228,6 +234,11 @@ function V2Stage({
         let timeline: gsap.core.Timeline;
         const update = () => {
           element.dataset.explode = String(pose.explode);
+          const { pool } = resolveLight(pose.light);
+          element.style.setProperty("--pool-x", pool.x + "%");
+          element.style.setProperty("--pool-y", pool.y + "%");
+          element.style.setProperty("--pool-size", pool.size + "%");
+          element.style.setProperty("--pool-strength", String(pool.strength));
           root.style.setProperty("--blueprint-mix", String(pose.blueprint));
           root.dataset.mode = pose.blueprint >= 0.5 ? "blueprint" : "studio";
           viewer!.setPose(pose);

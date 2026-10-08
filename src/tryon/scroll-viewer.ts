@@ -6,8 +6,18 @@ import { createBlueprint } from "./blueprint";
 import { createBlueprintRender } from "./blueprint-render";
 import type { BlueprintTokens } from "./blueprint-theme";
 import { VIEWER_MAX_PIXEL_RATIO } from "./studio";
-import { EXPLODE_MM } from "./scroll-steps";
-import { clampPhi, type OrbitPose, type ScenePose } from "./scroll-poses";
+import {
+  buildStudioEnvironment,
+  readStudioEnvironment,
+} from "./studio-environment";
+import { EXPLODE_MM, ENV_FOLLOW } from "./scroll-steps";
+import {
+  resolveLight,
+  KEY_DISTANCE,
+  clampPhi,
+  type OrbitPose,
+  type ScenePose,
+} from "./scroll-poses";
 
 export function createScrollViewer({
   canvas,
@@ -39,7 +49,11 @@ export function createScrollViewer({
       onError();
     },
     disposeBlueprint,
+    () =>
+      buildStudioEnvironment(readStudioEnvironment(window.location.search)),
   );
+  const keyPosition = new THREE.Vector3();
+  const keyColor = new THREE.Color();
   const target = new THREE.Vector3();
   const offset = new THREE.Vector3();
   const spherical = new THREE.Spherical();
@@ -181,8 +195,38 @@ export function createScrollViewer({
       blueprint?.recolor(tokens);
       render();
     },
-    setPose(next: OrbitPose & { explode?: number; blueprint?: number }) {
+    setPose(
+      next: OrbitPose & { explode?: number; blueprint?: number; light?: number },
+    ) {
       if (stopped) return;
+      const light = next.light ?? 0;
+      const resolvedLight = resolveLight(light);
+      keyPosition.setFromSphericalCoords(
+        KEY_DISTANCE,
+        THREE.MathUtils.degToRad(90 - resolvedLight.key.elevation),
+        THREE.MathUtils.degToRad(resolvedLight.key.azimuth),
+      );
+      keyColor.set(resolvedLight.key.color);
+      const environmentYaw =
+        ENV_FOLLOW * next.theta + THREE.MathUtils.degToRad(resolvedLight.yaw);
+      const keyMoved = !studio.key.position.equals(keyPosition);
+      if (keyMoved) shadowDirty = true;
+      if (
+        keyMoved ||
+        !studio.key.color.equals(keyColor) ||
+        studio.key.intensity !== resolvedLight.key.intensity ||
+        studio.hemisphere.intensity !== resolvedLight.hemisphere ||
+        studio.scene.environmentIntensity !== resolvedLight.environment ||
+        studio.scene.environmentRotation.y !== environmentYaw ||
+        light !== pose?.light
+      )
+        renderRevision++;
+      studio.key.position.copy(keyPosition);
+      studio.key.color.copy(keyColor);
+      studio.key.intensity = resolvedLight.key.intensity;
+      studio.hemisphere.intensity = resolvedLight.hemisphere;
+      studio.scene.environmentIntensity = resolvedLight.environment;
+      studio.scene.environmentRotation.y = environmentYaw;
       const explode = next.explode ?? 0;
       if (explode !== lastExplode) shadowDirty = true;
       lastExplode = explode;
@@ -199,6 +243,7 @@ export function createScrollViewer({
       pose = {
         ...next,
         explode,
+        light,
         blueprint: blueprintMix,
         phi: clampPhi(next.phi),
       };

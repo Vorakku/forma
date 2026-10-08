@@ -629,3 +629,59 @@ test("monotonic animation clock excludes explicit pauses and completes only once
   animation.tween.kill();
   timeline.kill();
 });
+
+test("resolveLight preserves exact integer rows and blends scalar, pool and linear colour midpoints without mutation", () => {
+  const { SCROLL_ANGLES, resolveLight } = motion;
+  const before = JSON.stringify(SCROLL_ANGLES);
+  SCROLL_ANGLES.forEach((row, index) => assert.equal(resolveLight(index), row.light));
+  assert.equal(resolveLight(-10), SCROLL_ANGLES[0].light);
+  assert.equal(resolveLight(100), SCROLL_ANGLES.at(-1).light);
+  for (let i = 0; i < SCROLL_ANGLES.length - 1; i++) {
+    const a = SCROLL_ANGLES[i].light, b = SCROLL_ANGLES[i + 1].light;
+    const mid = resolveLight(i + 0.5);
+    for (const scalar of ["hemisphere", "environment", "yaw"])
+      assert.equal(mid[scalar], (a[scalar] + b[scalar]) / 2);
+    for (const scalar of ["elevation", "intensity"])
+      assert.equal(mid.key[scalar], (a.key[scalar] + b.key[scalar]) / 2);
+    for (const scalar of ["x", "y", "size", "strength"])
+      assert.equal(mid.pool[scalar], (a.pool[scalar] + b.pool[scalar]) / 2);
+    const from = new THREE.Color(a.key.color), to = new THREE.Color(b.key.color);
+    for (const channel of ["r", "g", "b"])
+      assert.equal(mid.key.color[channel], (from[channel] + to[channel]) / 2);
+  }
+  assert.equal(JSON.stringify(SCROLL_ANGLES), before);
+});
+
+test("light azimuth wraps the short way while per-angle yaw interpolates linearly", () => {
+  const a = motion.SCROLL_ANGLES[0].light;
+  const rows = [
+    { light: { ...a, key: { ...a.key, azimuth: 170 }, yaw: -10 } },
+    { light: { ...a, key: { ...a.key, azimuth: -170 }, yaw: 30 } },
+  ];
+  assert.equal(motion.resolveLight(0.25, rows).key.azimuth, 175);
+  assert.equal(motion.resolveLight(0.5, rows).key.azimuth, 180);
+  assert.equal(motion.resolveLight(0.75, rows).key.azimuth, 185);
+  assert.equal(motion.resolveLight(1, rows), rows[1].light);
+  assert.equal(motion.resolveLight(0.5, [...rows].reverse()).key.azimuth, -180);
+  assert.equal(motion.resolveLight(0.5, rows).yaw, 10);
+});
+
+test("pose light is linear in every camera window forward and reverse, including resized budgets and instant jumps", () => {
+  const pose = { ...fixtures[0].poses[0] };
+  const timeline = gsap.timeline({ paused: true });
+  for (const { poses, budget } of fixtures) {
+    populateScrollTimeline(timeline, pose, poses, budget);
+    for (const direction of [1, -1]) {
+      for (let sample = 0; sample <= 80; sample++) {
+        const time = direction === 1 ? sample / 20 : (80 - sample) / 20;
+        timeline.time(time, false);
+        assert.ok(Math.abs(pose.light - time) < 1e-6, "linear light at " + time);
+      }
+    }
+    for (const index of [4, 0, 2, 1, 3, 0]) {
+      timeline.time(index, false);
+      assert.equal(pose.light, index, "instant cut to " + index);
+    }
+  }
+  timeline.kill();
+});

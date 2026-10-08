@@ -15,7 +15,7 @@ const output = resolve(".sites-runtime/viewer-tests.mjs");
 await build({
   stdin: {
     contents:
-      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './screen-motion';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';",
+      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './screen-motion';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';export * from './studio-environment';",
     resolveDir: resolve("src/tryon"),
   },
   outfile: output,
@@ -33,7 +33,7 @@ await build({
         );
         build.onLoad({ filter: /.*/, namespace: "renderer" }, () => ({
           contents:
-            "export * from 'three';export class WebGLRenderer{constructor(options){return new globalThis.viewerHarness.Renderer(options)}}export class PMREMGenerator{constructor(){globalThis.viewerHarness.generators++}fromScene(){return globalThis.viewerHarness.environment}dispose(){globalThis.viewerHarness.generatorsDisposed++}}",
+            "export * from 'three';export class WebGLRenderer{constructor(options){return new globalThis.viewerHarness.Renderer(options)}}export class PMREMGenerator{constructor(){globalThis.viewerHarness.generators++}fromScene(scene,sigma){globalThis.viewerHarness.captureEnvironment(scene,sigma);if(globalThis.viewerHarness.failEnvironment)throw Error('PMREM failure');return globalThis.viewerHarness.environment}dispose(){globalThis.viewerHarness.generatorsDisposed++}}",
         }));
       },
     },
@@ -54,6 +54,8 @@ const {
   populateScrollTimeline,
   clampPhi,
   SCROLL_ANGLES,
+  ENV_FOLLOW,
+  KEY_DISTANCE,
   createExploder,
   EXPLODE_MM,
   EXPLODE_STAGGER,
@@ -137,6 +139,7 @@ function devices({
   height = 570,
   reduced = false,
   failConstructor = false,
+  search = "",
 } = {}) {
   const canvas = new Surface(),
     doc = new Surface(),
@@ -161,6 +164,15 @@ function devices({
     callbacks,
     renderers: [],
     generators: 0,
+    environmentSources: [],
+    captureEnvironment(scene, sigma) {
+      const disposals = new Map();
+      for (const resource of resources(scene)) {
+        disposals.set(resource, 0);
+        resource.addEventListener("dispose", () => disposals.set(resource, disposals.get(resource) + 1));
+      }
+      this.environmentSources.push({ scene, sigma, disposals });
+    },
     generatorsDisposed: 0,
     environment: {
       texture: new THREE.Texture(),
@@ -213,7 +225,7 @@ function devices({
     }
   };
   globalThis.viewerHarness = h;
-  globalThis.window = { matchMedia: () => motion, devicePixelRatio: 3 };
+  globalThis.window = { location: { search }, matchMedia: () => motion, devicePixelRatio: 3 };
   globalThis.document = doc;
   globalThis.ResizeObserver = class {
     constructor(callback) {
@@ -889,7 +901,7 @@ test("a sixth table angle extends the integer timeline without changing the driv
     { ...SCROLL_ANGLES[0], name: "Extra angle" },
   ];
   const resolved = resolveScrollPoses(10, 1, () => ({ x: 6, y: 1, z: 5 }));
-  const poses = table.map((_, index) => resolved[index] ?? resolved[0]);
+  const poses = table.map((_, index) => ({ ...(resolved[index] ?? resolved[0]), light: index }));
   const pose = { ...poses[0] };
   const timeline = populateScrollTimeline(
     gsap.timeline({ paused: true }),
@@ -1540,13 +1552,13 @@ test("scroll-only shadow caching refreshes on assembly changes and keeps product
   const renderer = h.renderers[0];
   assert.equal(renderer.shadowMap.autoUpdate, false);
   assert.equal(renderer.shadowMap.needsUpdate, true);
-  viewer.setPose({ ...poses[1], explode: 0 });
+  viewer.setPose({ ...poses[1], light: 0, explode: 0 });
   assert.equal(renderer.shadowMap.needsUpdate, false);
-  viewer.setPose({ ...poses[1], explode: 0.5 });
+  viewer.setPose({ ...poses[1], light: 0, explode: 0.5 });
   assert.equal(renderer.shadowMap.needsUpdate, true);
-  viewer.setPose({ ...poses[1], explode: 0.5 });
+  viewer.setPose({ ...poses[1], light: 0, explode: 0.5 });
   assert.equal(renderer.shadowMap.needsUpdate, false);
-  viewer.setPose({ ...poses[1], explode: 0 });
+  viewer.setPose({ ...poses[1], light: 0, explode: 0 });
   assert.equal(renderer.shadowMap.needsUpdate, true);
   viewer.dispose();
   const productDevices = devices();
@@ -1638,4 +1650,139 @@ test("blueprint lines are disposed once when the shared studio fails or loses co
     assert.equal(h.canvas.count(), 0);
     assert.ok(h.renderers[0].disposed);
   }
+});
+
+test("V2 builds only the selected procedural environment, falls back to strip and releases every PMREM source resource", () => {
+  for (const [search, variant, panelIntensities] of [
+    ["", "strip", [6, 8, 8, 0.6]],
+    ["?env=strip", "strip", [6, 8, 8, 0.6]],
+    ["?env=soft", "soft", [4, 1.5]],
+    ["?env=window", "window", [5, 3]],
+    ["?env=unknown", "strip", [6, 8, 8, 0.6]],
+  ]) {
+    const h = devices({ search });
+    const viewer = createScrollViewer({
+      canvas: h.canvas,
+      onError: () => assert.fail("unexpected failure"),
+    });
+    assert.equal(h.environmentSources.length, 1);
+    const { scene, sigma, disposals } = h.environmentSources[0];
+    assert.equal(scene.name, "V2 studio: " + variant);
+    assert.equal(sigma, 0.03);
+    assert.ok(disposals.size > 0);
+    assert.ok([...disposals.values()].every((count) => count === 1));
+    const cards = scene.children.filter((node) => node.geometry?.type === "PlaneGeometry" && node.name !== "reflection floor");
+    assert.deepEqual(cards.map((card) => card.material.color.r), panelIntensities);
+    for (const card of cards) {
+      assert.ok(card.material.isMeshBasicMaterial);
+      const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(card.quaternion);
+      assert.ok(normal.dot(card.position.clone().normalize()) < -0.9999, "panel faces capture origin");
+    }
+    const shell = scene.getObjectByName("room");
+    assert.equal(shell.material.side, THREE.BackSide);
+    assert.equal(shell.material.color.r, variant === "strip" ? 0.03 : variant === "soft" ? 0.15 : 0.08);
+    const floor = scene.getObjectByName("reflection floor");
+    assert.equal(floor.material.color.r, variant === "window" ? 0.3 : 0.25);
+    viewer.dispose();
+    assert.equal(h.generatorsDisposed, 1);
+    assert.equal(h.environment.disposals, 1);
+    assert.ok([...disposals.values()].every((count) => count === 1), "source resources are not disposed twice");
+    assert.equal(h.callbacks.size, 0);
+  }
+  const h = devices({ search: "?env=window" });
+  const viewer = h.start();
+  const source = h.environmentSources[0];
+  assert.equal(source.scene.name, "RoomEnvironment");
+  assert.equal(source.sigma, 0.03);
+  assert.ok([...source.disposals.values()].every((count) => count === 1));
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  h.flush();
+  const renderer = h.renderers[0];
+  const key = renderer.scene.children.find((node) => node.isDirectionalLight);
+  const hemi = renderer.scene.children.find((node) => node.isHemisphereLight);
+  assert.deepEqual(key.position.toArray(), [-15, 28, 18]);
+  assert.equal(key.intensity, 3);
+  assert.equal(hemi.intensity, 0.8);
+  assert.equal(renderer.scene.environmentIntensity, 1);
+  assert.equal(renderer.scene.environmentRotation.y, 0);
+  assert.equal(renderer.toneMappingExposure, 1.45);
+  viewer.dispose();
+});
+
+test("PMREM conversion failure releases the custom scene, generator and renderer", () => {
+  const h = devices();
+  h.failEnvironment = true;
+  assert.throws(() => createScrollViewer({ canvas: h.canvas, onError() {} }), /PMREM failure/);
+  assert.equal(h.environmentSources.length, 1);
+  assert.ok([...h.environmentSources[0].disposals.values()].every((count) => count === 1));
+  assert.equal(h.generatorsDisposed, 1);
+  assert.ok(h.renderers[0].disposed);
+  assert.equal(h.canvas.count(), 0);
+});
+
+test("landed V2 poses apply each row's key, hemisphere, environment and camera-follow yaw; omitted light defaults to hero", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const poses = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius);
+  viewer.setPose(poses[0]);
+  const renderer = h.renderers[0], scene = renderer.scene;
+  const key = scene.children.find((node) => node.isDirectionalLight);
+  const hemi = scene.children.find((node) => node.isHemisphereLight);
+  for (const [index, pose] of poses.entries()) {
+    viewer.setPose({ ...pose, blueprint: 0 });
+    const light = SCROLL_ANGLES[index].light;
+    const expected = new THREE.Vector3().setFromSphericalCoords(
+      KEY_DISTANCE, THREE.MathUtils.degToRad(90 - light.key.elevation), THREE.MathUtils.degToRad(light.key.azimuth),
+    );
+    assert.ok(key.position.equals(expected));
+    assert.ok(Math.abs(key.position.length() - Math.hypot(-15, 28, 18)) < 1e-12);
+    assert.equal(key.intensity, light.key.intensity);
+    assert.ok(key.color.equals(new THREE.Color(light.key.color)));
+    assert.equal(hemi.intensity, light.hemisphere);
+    assert.equal(scene.environmentIntensity, light.environment);
+    assert.equal(scene.environmentRotation.y, ENV_FOLLOW * pose.theta + THREE.MathUtils.degToRad(light.yaw));
+    assert.equal(scene.backgroundRotation.y, 0);
+    assert.equal(renderer.toneMappingExposure, 1.45);
+    assert.deepEqual([key.shadow.camera.left, key.shadow.camera.bottom, key.shadow.camera.right, key.shadow.camera.top], [-23, -23, 23, 23]);
+  }
+  const { light, ...withoutLight } = poses[4];
+  viewer.setPose(withoutLight);
+  assert.equal(key.intensity, SCROLL_ANGLES[0].light.key.intensity);
+  assert.equal(hemi.intensity, SCROLL_ANGLES[0].light.hemisphere);
+  assert.ok(key.color.equals(new THREE.Color(SCROLL_ANGLES[0].light.key.color)));
+  viewer.dispose();
+});
+
+test("light-only changes invalidate blueprint images and moving keys refresh shadows; environment rotation leaves shadows cached", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const pose = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius)[2];
+  viewer.setPose({ ...pose, blueprint: 0 });
+  const renderer = h.renderers[0], scene = renderer.scene;
+  viewer.setPose({ ...pose, blueprint: 0.5 });
+  let renders = renderer.renders;
+  viewer.setPose({ ...pose, blueprint: 0.6 });
+  assert.equal(renderer.renders - renders, 1, "unchanged lighting reuses both cached images");
+  renders = renderer.renders;
+  viewer.setPose({ ...pose, light: 3, blueprint: 0.6 });
+  assert.equal(renderer.renders - renders, 3, "light-only change invalidates studio and drawing cache");
+  assert.equal(renderer.shadowMap.needsUpdate, true);
+  renders = renderer.renders;
+  viewer.setPose({ ...pose, light: 3, theta: pose.theta + 0.4, blueprint: 0.6 });
+  assert.equal(renderer.renders - renders, 3);
+  assert.equal(scene.environmentRotation.y, ENV_FOLLOW * (pose.theta + 0.4));
+  assert.equal(renderer.shadowMap.needsUpdate, false);
+  assert.equal(renderer.toneMappingExposure, 1.45);
+  assert.equal(h.callbacks.size, 0);
+  // At full blueprint the studio pass is skipped. A key move must remain dirty
+  // until the next visible studio image, then subsequent fades can reuse it.
+  viewer.setPose({ ...pose, light: 4, blueprint: 1 });
+  assert.equal(renderer.shadowMap.needsUpdate, true);
+  viewer.setPose({ ...pose, light: 4, blueprint: 0.5 });
+  assert.equal(renderer.shadowMap.needsUpdate, true);
+  viewer.setPose({ ...pose, light: 4, blueprint: 0 });
+  assert.equal(renderer.shadowMap.needsUpdate, false);
+  viewer.dispose();
 });

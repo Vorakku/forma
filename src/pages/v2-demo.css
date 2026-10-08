@@ -74,9 +74,13 @@
 }
 .v2-demo-studio {
   background: radial-gradient(
-    ellipse at 50% 35%,
+    ellipse at var(--pool-x, 50%) var(--pool-y, 35%),
     var(--paper),
-    var(--soft) 75%
+    color-mix(
+      in srgb,
+      var(--soft),
+      var(--ink) calc((1 - var(--pool-strength, 1)) * 10%)
+    ) var(--pool-size, 75%)
   );
   opacity: calc(1 - var(--blueprint-mix, 0));
 }

@@ -38,6 +38,7 @@ export function populateScrollTimeline(
                   move.to,
                   pathProgress(move, driver.progress),
                 ),
+                { light: phase.start + driver.progress },
               ),
           },
           phase.start,
