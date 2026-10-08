@@ -25,6 +25,10 @@ import {
   createScrollSteps,
   acceptsStepInput,
   GESTURE_IDLE_MS,
+  EXIT_ZOOM_S,
+  EXIT_HOLD_S,
+  EXIT_SCALE,
+  EXIT_REDUCED_S,
   type StepCommand,
   type StepEvent,
 } from "@/tryon/scroll-steps";
@@ -206,7 +210,7 @@ const OFFLINE_ELLIS: Product = {
   finishes: [],
 };
 
-export function V2Demo() {
+export function V2Demo({ onExit }: { onExit: () => void }) {
   const product = useProduct("the-ellis");
   const load = useProductList(["the-ellis"]);
   return (
@@ -215,16 +219,17 @@ export function V2Demo() {
       loading={load.loading}
       loadError={load.error}
       withLinks
+      onExit={onExit}
     />
   );
 }
 
 // Shown on its own, without the shell, when the store cannot reach the server.
-export function OfflineV2Demo() {
+export function OfflineV2Demo({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     document.title = "FORMA V2 Demo — FORMA";
   }, []);
-  return <V2Stage product={OFFLINE_ELLIS} loading={false} loadError="" />;
+  return <V2Stage product={OFFLINE_ELLIS} loading={false} loadError="" onExit={onExit} />;
 }
 
 function V2Stage({
@@ -232,12 +237,16 @@ function V2Stage({
   loading,
   loadError,
   withLinks = false,
+  onExit,
 }: {
   product: Product | undefined;
   loading: boolean;
   loadError: string;
   withLinks?: boolean;
+  onExit: () => void;
 }) {
+  const exitCallback = useRef(onExit);
+  exitCallback.current = onExit;
   const load = { loading, error: loadError };
   const stage = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -267,6 +276,7 @@ function V2Stage({
       const root = document.documentElement;
       let themeTween: gsap.core.Tween | undefined;
       let reducedMotion = false;
+      let exitTimeline: gsap.core.Timeline | undefined;
       const clearThemeOverrides = () => {
         for (const token of BLUEPRINT_TOKENS)
           root.style.removeProperty(`--blueprint-${token}`);
@@ -417,6 +427,7 @@ function V2Stage({
           if (document.hidden) animation.pause();
         };
         refreshPose = () => {
+          if (exitTimeline) return;
           const time = timeline.time();
           const running = !!animation,
             velocity = animation?.velocity() ?? 0;
@@ -443,11 +454,41 @@ function V2Stage({
             gsap.set(document.documentElement, { overflow: "hidden" });
             gsap.set(document.body, { overflow: "hidden" });
             gsap.set(element, { touchAction: "none" });
+            const playExit = () => {
+              element.dataset.exiting = "true";
+              element.dataset.angle = String(last);
+              element.removeAttribute("data-moving");
+              themeTween?.kill();
+              const ink = element.querySelector(".v2-demo-ink");
+              exitTimeline = gsap.timeline();
+              if (reducedMotion) {
+                exitTimeline.to(ink, { opacity: 1, duration: EXIT_REDUCED_S, ease: "none" });
+                exitTimeline.call(() => exitCallback.current());
+                return;
+              }
+              const headline = element.querySelector<HTMLElement>(".v2-demo-finale h2")!;
+              const origin = element.querySelector<HTMLElement>(".finale-origin")!;
+              const glyph = origin.getBoundingClientRect();
+              const box = headline.getBoundingClientRect();
+              const fontSize = parseFloat(getComputedStyle(origin).fontSize);
+              gsap.set(headline, {
+                transformOrigin: `${glyph.left + 0.07 * fontSize - box.left}px ${glyph.top + glyph.height / 2 - box.top}px`,
+              });
+              exitTimeline
+                .to(headline, { scale: EXIT_SCALE, duration: EXIT_ZOOM_S, ease: "power3.in" }, 0)
+                .to(element.querySelectorAll(".v2-demo-finale .eyebrow, .finale-aside, .v2-demo-finale-foot"),
+                  { opacity: 0, duration: 0.4, ease: "none" }, 0.3)
+                .to(canvas.current, { opacity: 0, duration: EXIT_ZOOM_S - 0.45, ease: "none" }, 0.45)
+                .to(ink, { opacity: 1, duration: EXIT_ZOOM_S - 0.6, ease: "none" }, 0.6)
+                .call(() => exitCallback.current(), [], EXIT_ZOOM_S + EXIT_HOLD_S);
+            };
             const execute = (commands: StepCommand[]) => {
               for (const command of commands) {
                 const velocity = animation?.velocity() ?? 0;
                 stopAnimation();
-                if (command.type === "scrubTo") {
+                if (command.type === "exit") {
+                  playExit();
+                } else if (command.type === "scrubTo") {
                   element.dataset.moving = "true";
                   timeline.time(command.time, false);
                 } else {
@@ -545,6 +586,7 @@ function V2Stage({
                 type: "key",
                 key: event.key,
                 shiftKey: event.shiftKey,
+                repeat: event.repeat,
                 at: event.timeStamp,
                 time: timeline.time(),
                 blocked: blocked(event.target),
@@ -577,10 +619,15 @@ function V2Stage({
         setReady(true);
         return () => {
           live = false;
+          exitTimeline?.kill();
           media.revert();
+          // The header survives route navigation; discard the demo's inline fade.
+          header?.style.removeProperty("opacity");
+          header?.style.removeProperty("visibility");
           clearMode();
           refreshPose = () => {};
           timeline.kill();
+          element.removeAttribute("data-exiting");
           element.removeAttribute("data-moving");
           element.removeAttribute("data-angle");
           element.removeAttribute("data-explode");
@@ -617,7 +664,7 @@ function V2Stage({
         <div className="v2-demo-copy v2-demo-finale" data-for-angle="4">
           <span className="eyebrow">FORMA Eyewear.</span>
           <h2>
-            <span>Made to</span>
+            <span>Mad<span className="finale-origin">e</span> to</span>
             <span>be seen</span>
           </h2>
           <div className="finale-aside">
@@ -693,6 +740,7 @@ function V2Stage({
           </div>
         </>
       )}
+      <div className="v2-demo-ink" aria-hidden="true" />
       <span className="v2-demo-announcement" aria-live="polite">
         {ready &&
           !unavailable &&

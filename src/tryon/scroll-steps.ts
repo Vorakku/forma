@@ -13,11 +13,18 @@ export const VISIBLE_MARGIN = 0.1;
 export const RAMP_S = 0.35;
 export const SCRUB_PX_PER_S = 0.25; // × viewport height
 export const JUMP_SPEEDUP = 2;
+export const EXIT_ZOOM_S = 0.9;
+export const EXIT_HOLD_S = 0.15;
+export const EXIT_REVEAL_S = 0.6;
+export const EXIT_SCALE = 40;
+export const EXIT_BLUR_PX = 12;
+export const EXIT_REDUCED_S = 0.2;
 
 export type StepCommand =
   | { type: "scrubTo"; time: number }
   | { type: "animateTo"; angle: number; jump: boolean }
-  | { type: "cutTo"; angle: number };
+  | { type: "cutTo"; angle: number }
+  | { type: "exit" };
 
 type InputContext = {
   at: number;
@@ -35,6 +42,7 @@ export type StepEvent = InputContext &
         type: "key";
         key: string;
         shiftKey?: boolean;
+        repeat?: boolean;
         editable?: boolean;
         interactive?: boolean;
       }
@@ -78,6 +86,7 @@ type Gesture = {
   travel: number;
   maxTravel: number;
   consumed: boolean;
+  exitReady: boolean;
 };
 
 // Seconds are also the scrub weights; one reference second has weight one.
@@ -108,6 +117,22 @@ export function createScrollSteps(
   let target = landed;
   let flightAnchor: number | undefined;
   let gesture: Gesture | undefined;
+  let exited = false;
+  let settled = true;
+  let inputAt = -Infinity;
+  let lastLandedAt = -Infinity;
+
+  const canExit = (time: number) =>
+    landed === lastAngle &&
+    target === lastAngle &&
+    flightAnchor === undefined &&
+    settled &&
+    time === lastAngle;
+  const exit = (): StepCommand[] => {
+    exited = true;
+    gesture = undefined;
+    return [{ type: "exit" }];
+  };
 
   function move(
     angle: number,
@@ -126,9 +151,12 @@ export function createScrollSteps(
     target = next;
     if (reduced) {
       landed = target;
+      settled = true;
+      lastLandedAt = inputAt;
       flightAnchor = undefined;
       return [{ type: "cutTo", angle: target }];
     }
+    settled = false;
     flightAnchor ??= target;
     return [
       {
@@ -150,6 +178,16 @@ export function createScrollSteps(
   function finish(time: number, cancelled = false): StepCommand[] {
     if (!gesture || gesture.consumed) return [];
     const { base, neighbour, lastDirection, kind, maxTravel } = gesture;
+    // An outward touch at Front is a trigger on release, never a scrub.
+    if (base === lastAngle && neighbour === lastAngle && canExit(time)) {
+      return !cancelled &&
+        kind === "touch" &&
+        gesture.exitReady &&
+        gesture.travel >= TAP_PX &&
+        lastDirection > 0
+        ? exit()
+        : [];
+    }
     const direction = Math.sign(neighbour - base);
     const destination =
       cancelled ||
@@ -175,6 +213,9 @@ export function createScrollSteps(
       travel: 0,
       maxTravel: 0,
       consumed: false,
+      exitReady:
+        canExit(time) &&
+        (kind === "touch" || at - lastLandedAt >= GESTURE_IDLE_MS),
     };
   }
 
@@ -210,13 +251,19 @@ export function createScrollSteps(
               seconds[Math.min(gesture.base, gesture.neighbour)]),
       ),
     );
-    return next === time ? [] : [{ type: "scrubTo", time: next }];
+    if (next === time) return [];
+    settled = false;
+    return [{ type: "scrubTo", time: next }];
   }
 
   return {
     setReduced(value: boolean, time: number): StepCommand[] {
+      if (exited) return [];
       reduced = value;
       if (gesture && !gesture.consumed) {
+        // A preference change is not a release gesture at the exit boundary.
+        if (canExit(time) && gesture.base === gesture.neighbour)
+          return [{ type: "cutTo", angle: target }];
         const commands = finish(time);
         gesture.consumed = true;
         if (commands.length) return [{ type: "cutTo", angle: target }];
@@ -226,8 +273,12 @@ export function createScrollSteps(
       return [{ type: "cutTo", angle: target }];
     },
     handle(event: StepEvent): StepCommand[] {
+      if (exited) return [];
+      inputAt = event.at;
       if (event.type === "landed") {
         landed = target = clamp(event.angle);
+        settled = true;
+        lastLandedAt = event.at;
         flightAnchor = undefined;
         return [];
       }
@@ -243,6 +294,12 @@ export function createScrollSteps(
           const current = gesture!;
           current.last = event.at;
           if (current.consumed) return commands;
+          // Even a gesture starting just after landing must wait for idle.
+          // Consume it so its momentum cannot become eligible later.
+          if (event.deltaY > 0 && canExit(event.time) && !current.exitReady) {
+            current.consumed = true;
+            return commands;
+          }
           current.accumulated += Math.abs(event.deltaY);
           if (
             reduced ||
@@ -250,6 +307,8 @@ export function createScrollSteps(
               current.accumulated >= FLICK_PX)
           ) {
             current.consumed = true;
+            if (event.deltaY > 0 && current.exitReady && canExit(event.time))
+              return exit();
             commands.push(
               ...step(
                 Math.sign(event.deltaY),
@@ -295,6 +354,8 @@ export function createScrollSteps(
                 : 0;
           if (!direction && event.key !== "Home" && event.key !== "End")
             return [];
+          if (direction > 0 && canExit(event.time))
+            return event.repeat ? [] : exit();
           const wasScrubbing =
             !!gesture && !gesture.consumed && gesture.travel !== 0;
           gesture = undefined;

@@ -496,15 +496,15 @@
   font: 600 26cqmin / 0.78 "Big Shoulders Display", Arial, sans-serif;
   text-transform: uppercase;
 }
-.v2-demo-finale h2 span {
+.v2-demo-finale h2 > span {
   position: absolute;
   white-space: nowrap;
 }
-.v2-demo-finale h2 span:first-child {
+.v2-demo-finale h2 > span:first-child {
   left: calc(50cqw - 31cqmin);
   bottom: calc(50cqh + 8.5cqmin);
 }
-.v2-demo-finale h2 span:last-child {
+.v2-demo-finale h2 > span:last-child {
   right: calc(50cqw - 31cqmin);
   top: calc(50cqh + 10cqmin);
 }
@@ -561,10 +561,10 @@
   .v2-demo-finale .eyebrow {
     left: 24px;
   }
-  .v2-demo-finale h2 span:first-child {
+  .v2-demo-finale h2 > span:first-child {
     left: 24px;
   }
-  .v2-demo-finale h2 span:last-child {
+  .v2-demo-finale h2 > span:last-child {
     right: 24px;
   }
   .finale-aside {
@@ -575,4 +575,20 @@
     right: 24px;
     bottom: 24px;
   }
+}
+
+.v2-demo-ink {
+  position: absolute;
+  inset: 0;
+  z-index: 30; /* Above the online floating header too. */
+  background: var(--ink);
+  opacity: 0;
+  pointer-events: none;
+}
+.v2-demo-stage[data-exiting] {
+  pointer-events: none;
+}
+
+.v2-demo-stage[data-exiting] .v2-demo-ink {
+  pointer-events: auto;
 }

@@ -1,7 +1,15 @@
-import { Component, useEffect, lazy, Suspense, type ReactNode } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import {
+  Component,
+  useEffect,
+  useState,
+  lazy,
+  Suspense,
+  type ReactNode,
+} from "react";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { useApp } from "@/lib/store";
+import { ExitReveal } from "@/components/exit-reveal";
 import { Shell } from "@/components/shell";
 import { NotFound } from "@/components/common";
 import { Home, Catalog, ProductDetail, Wishlist } from "@/pages/shop";
@@ -61,6 +69,36 @@ const Mark = () => (
     FORMA<span className="wordmark-dot">®</span>
   </span>
 );
+function StoreUnavailable() {
+  const { error, init } = useApp();
+  return (
+    <main className="startup-state">
+      <Mark />
+      <h1 tabIndex={-1}>We couldn’t open the store</h1>
+      <p>{error || "Trying to reach the store…"}</p>
+      <button className="button" onClick={() => void init()}>
+        Try again
+      </button>
+    </main>
+  );
+}
+
+function RevealedShell() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const v2Exit = location.pathname === "/" && location.state?.v2Exit === true;
+  return (
+    <ExitReveal
+      active={v2Exit}
+      onComplete={() => {
+        if (v2Exit) navigate(".", { replace: true, state: null });
+      }}
+    >
+      <Shell />
+    </ExitReveal>
+  );
+}
+
 class ErrorBoundary extends Component<
   { children: ReactNode },
   { error: boolean }
@@ -89,6 +127,8 @@ class ErrorBoundary extends Component<
 }
 export function App() {
   const { init, ready, error } = useApp();
+  const [demoDone, setDemoDone] = useState(false);
+  const navigate = useNavigate();
   useEffect(() => {
     void init();
   }, [init]);
@@ -126,7 +166,7 @@ export function App() {
           }
         >
           <Routes>
-            <Route element={<Shell />}>
+            <Route element={<RevealedShell />}>
               <Route index element={<Home />} />
               <Route path="/catalog" element={<Catalog />} />
               <Route path="/product/:id" element={<ProductDetail />} />
@@ -184,16 +224,28 @@ export function App() {
               />
               <Route path="/legal" element={<Legal />} />
               <Route path="/try-on" element={<TryOn />} />
-              <Route path="/v2-demo" element={<V2Demo />} />
+              <Route
+                path="/v2-demo"
+                element={
+                  <V2Demo
+                    onExit={() => navigate("/", { state: { v2Exit: true } })}
+                  />
+                }
+              />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
         </Suspense>
-      ) : error ? (
-        // Without the server there is no store to show, only the V2 scroll.
-        <Suspense fallback={null}>
-          <OfflineV2Demo />
-        </Suspense>
+      ) : error || demoDone ? (
+        demoDone ? (
+          <ExitReveal active>
+            <StoreUnavailable />
+          </ExitReveal>
+        ) : (
+          <Suspense fallback={null}>
+            <OfflineV2Demo onExit={() => setDemoDone(true)} />
+          </Suspense>
+        )
       ) : (
         <div className="startup-state">
           <Mark />

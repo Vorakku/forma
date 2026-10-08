@@ -666,3 +666,80 @@ test.describe("motion stopwatch", () => {
     expect(errors).toEqual([]);
   });
 });
+
+test("finale exits online to a usable home Shell and reveals only once", async ({ page }) => {
+  await page.goto("/v2-demo");
+  await ready(page);
+  await page.keyboard.press("End");
+  await landed(page, 4);
+  await page.keyboard.press("ArrowDown");
+  await expect(page).toHaveURL(/\/$/);
+  const heading = page.locator("main h1").first();
+  await expect(heading).toBeVisible();
+  await expect(heading).toBeFocused();
+  await expect(page.locator(".site-header")).toBeVisible();
+  await expect(page.locator(".site-header")).toHaveCSS("opacity", "1");
+  const wrapper = page.locator(".exit-reveal-content");
+  await expect(wrapper).toHaveCSS("filter", "none");
+  await expect(wrapper).toHaveCSS("transform", "none");
+  await expect(wrapper).toHaveCSS("will-change", "auto");
+  await expect(page.locator(".exit-reveal-ink")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => history.state.usr)).toBeNull();
+  await page.mouse.wheel(0, 600);
+  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(100);
+  await page.reload();
+  await expect(page.locator("main h1").first()).toBeVisible();
+  await expect(page.locator(".exit-reveal-ink")).toHaveCount(0);
+  await page.goBack();
+  await ready(page);
+});
+
+test("offline finale reveals and focuses StoreUnavailable; retry stays there", async ({ page }) => {
+  await page.route("**/api/**", (route) => route.fulfill({ status: 502, body: "offline" }));
+  await page.goto("/");
+  await ready(page);
+  await page.keyboard.press("End");
+  await landed(page, 4);
+  await page.keyboard.press("ArrowDown");
+  const heading = page.getByRole("heading", { name: "We couldn’t open the store" });
+  await expect(heading).toBeVisible();
+  await expect(heading).toBeFocused();
+  await expect(page.locator(".exit-reveal-content")).toHaveCSS("filter", "none");
+  await expect(page.locator("html")).not.toHaveCSS("overflow", "hidden");
+  await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+  await page.keyboard.press("Tab");
+  const retry = page.getByRole("button", { name: "Try again" });
+  await expect(retry).toBeFocused();
+  await retry.click();
+  await expect(heading).toBeVisible();
+  await expect(page.locator(".v2-demo-stage")).toHaveCount(0);
+  await expect(page.locator(".exit-reveal-ink")).toHaveCount(0);
+});
+
+test("reduced-motion finale completes both ink fades in under 0.6 seconds", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.route("**/api/**", (route) => route.fulfill({ status: 502, body: "offline" }));
+  await page.goto("/");
+  await ready(page);
+  await page.keyboard.press("End");
+  await landed(page, 4);
+  // Wait for the on-demand Front frame before timing the exit; software WebGL
+  // can otherwise spend longer than the fades rendering the preceding cut.
+  await page.locator(".v2-demo-stage").screenshot();
+  await page.evaluate(() => {
+    const start = performance.now();
+    (window as typeof window & { exitElapsed?: number }).exitElapsed = undefined;
+    new MutationObserver((_, observer) => {
+      const content = document.querySelector(".exit-reveal-content");
+      if (content && !content.classList.contains("is-revealing")) {
+        (window as typeof window & { exitElapsed?: number }).exitElapsed = performance.now() - start;
+        observer.disconnect();
+      }
+    }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  });
+  await expect(page.getByRole("heading", { name: "We couldn’t open the store" })).toBeFocused();
+  const elapsed = await page.evaluate(() => (window as typeof window & { exitElapsed?: number }).exitElapsed);
+  expect(elapsed).toBeLessThan(600);
+  await expect(page.locator(".exit-reveal-content")).toHaveCSS("filter", "none");
+});

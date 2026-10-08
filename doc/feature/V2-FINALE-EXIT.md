@@ -1,6 +1,6 @@
 # FORMA V2: finale zoom-through exit
 
-Spec written 2026-10-08. Read [V2-SCROLL-DEMO.md](V2-SCROLL-DEMO.md) first, especially its **Copy** section: the finale layout described there is already built and is the starting point for this work.
+Spec written and implemented 2026-10-08. Read [V2-SCROLL-DEMO.md](V2-SCROLL-DEMO.md) first, especially its **Copy** section: the finale layout described there is already built and is the starting point for this work.
 
 ## Background
 
@@ -113,3 +113,23 @@ Extend the existing suites; don't loosen anything.
   - reduced motion does a quick ink fade with no zoom or blur.
 - On `/v2-demo` with the server, the same exit lands on `/` with the header visible, the page scrolling normally, and no replay on refresh or Back.
 - Screenshots of the zoom at about 30%, 60% and 90%, and of the destination mid-reveal, are attached to the report.
+
+## Implementation verification
+
+Implemented on `task/forma-v2-lighting`. The initial copy/font/spec/reference working tree was committed separately as `2626223` before implementation.
+
+- All trigger rules are enforced by `createScrollSteps`, including a settled-state check (merely scrubbing back to exact Front time is insufficient), idle after landing, consumed momentum, forward touch release, key repeat and the terminal exited state.
+- One GSAP exit timeline controls the headline, surrounding copy, canvas and ink, with unmount cleanup. The ink layer also covers the floating online header during the hold. The 0.07 origin factor is unchanged: desktop and mobile captures place the origin in the E's vertical stem.
+- `ExitReveal` is shared by both destinations. Its animation class and ink overlay are removed on completion; computed filter and transform are `none`, and will-change is `auto`. It focuses the main heading with `tabIndex=-1`.
+- The global reduced-motion CSS disables all animations with `!important`. The reduced reveal explicitly overrides that rule for the specified 0.2 s opacity-only ink fade; content stays unblurred. Measured total exit/reveal: about 0.42 s after the on-demand Front frame renders. The E2E timing case waits for that frame so software WebGL time from the preceding angle cut is excluded.
+- Offline dev checks at both requested sizes confirm End stays on Front, momentum spanning its landing does not exit, a deliberate fresh notch does, and native mobile touch exits only on release. The destination heading receives focus; Tab reaches Try again; failed retry stays on StoreUnavailable. HTML/body overflow is restored.
+- With `../server` absent, `npm run test:e2e` was not run. Three E2E cases were added as specified. An additional browser smoke check with mocked API responses verifies the online route reaches `/`, clears its navigation state, restores the header, scrolls normally, leaves no filter/transform/will-change, does not replay on refresh and remounts angle 0 on Back.
+- `npm run typecheck`, `npm test` (95 passing tests) and `npm run build` pass. Existing motion, fit, projection, budget, timeline and lighting tests are unchanged. No dependencies, server files or round4 fixtures changed.
+- No behavior or timing deviations from the spec. The in-app browser was unavailable; visual verification used installed local Chromium through Playwright.
+
+The zoom frames sample elapsed zoom time at 0.27, 0.54 and 0.81 s (30/60/90% of the 0.9 s zoom), with the running GSAP timeline paused at those times. Mid-reveal is 0.18 s into the destination's 0.6 s CSS animation. These controls exist only in the browser verification session.
+
+| Viewport | Zoom 30% | Zoom 60% | Zoom 90% | Destination mid-reveal |
+|---|---|---|---|---|
+| 1920 × 945 | [Capture](screenshots/v2-finale-exit/desktop-zoom-30.png) | [Capture](screenshots/v2-finale-exit/desktop-zoom-60.png) | [Capture](screenshots/v2-finale-exit/desktop-zoom-90.png) | [Capture](screenshots/v2-finale-exit/desktop-destination-mid-reveal.png) |
+| 375 × 812 | [Capture](screenshots/v2-finale-exit/mobile-zoom-30.png) | [Capture](screenshots/v2-finale-exit/mobile-zoom-60.png) | [Capture](screenshots/v2-finale-exit/mobile-zoom-90.png) | [Capture](screenshots/v2-finale-exit/mobile-destination-mid-reveal.png) |
