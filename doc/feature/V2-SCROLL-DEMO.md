@@ -41,6 +41,24 @@ Gesture rules and all tuning constants are in `src/tryon/scroll-steps.ts`.
 
 Effect duration constants and `OVERLAP_S` have been removed. Effect speed follows the camera move; tune their shared duration with each angle's `pace`.
 
+## Lighting
+
+V2 uses a procedural PMREM studio environment: `?env=strip` (default; unknown values also use strip), `?env=soft`, or `?env=window`. Only the selected environment is built, and its panel/shell resources are released after conversion. The shop viewer keeps `RoomEnvironment`; try-on lighting and lens materials are unchanged.
+
+Each `SCROLL_ANGLES` row owns the key, hemisphere, environment intensity, yaw and CSS pool. `pose.light` follows timeline time linearly across the existing camera window; `resolveLight` blends scalars and linear colours and takes the shortest key azimuth path. It adds no time and cuts with the pose for reduced motion.
+
+| Angle | Key az / el / intensity / colour | Hemi | Env | Pool x / y / size / strength |
+|---|---|---|---|---|
+| Three-quarter | −40° / 50° / 3 / `#ffffff` | 0.8 | 1 | 50% / 35% / 75% / 1 |
+| Side, exploded | 117° / 35° / 2.2 / `#eaf1ff` | 0.5 | 1.15 | 60% / 30% / 70% / 0.85 |
+| Top / blueprint | −40° / 70° / 1.5 / `#ffffff` | 0.5 | 0.7 | 50% / 50% / 60% / 0.4 |
+| Hinge detail | −50° / 15° / 3.5 / `#fff6ea` | 0.35 | 0.8 | 55% / 45% / 45% / 0.6 |
+| Front | 0° / 55° / 3 / `#ffffff` | 0.8 | 1 | 50% / 30% / 75% / 1 |
+
+Environment yaw is `ENV_FOLLOW × pose.theta + radians(light.yaw)`, with `ENV_FOLLOW = 0.35` in `scroll-steps.ts` and every row yaw at 0°. The background pool follows the resolved row; hero strength 1 reproduces the original gradient. Light/environment changes invalidate the blueprint image cache, while only key movement invalidates lighting shadows. Exposure stays at 1.45 and rendering remains on demand.
+
+All specification starting values are retained. Automated coverage adds environment selection/disposal, landed lights, cache/shadow invalidation, linear colour/azimuth resolution and forward/reverse light interpolation; the existing blueprint-fade test is unchanged. Visual review remains outstanding: no browser was available in the implementation session, so defined highlights, lens reflections, moving reflections, pool banding, Ink/Blue appearance and the shop appearance could not be checked. E2E was not run because `../server` is missing.
+
 ## Timing history
 
 | Step | 97e1737 (fixed weights) | 9c9e566 (budget, slow) | 2026-10-08 retune | Round 1 handoff, desktop / phone | Effects during camera (current), desktop / phone |
@@ -66,11 +84,12 @@ No explode-start delay was needed. The fit test passes with the 0→1 explode sp
 - `src/tryon/scroll-budget.ts`, `screen-motion.ts`: per-step phase seconds from projected screen motion.
 - `src/tryon/scroll-timeline.ts`: builds the GSAP timeline from the budget.
 - `src/tryon/scroll-animation.ts`: trapezoid driver, retarget velocity, pause/resume.
-- `src/tryon/scroll-viewer.ts`, `studio.ts`, `explode.ts`, `blueprint*.ts`: renderer, on-demand frames, exploded fit, blueprint pass.
+- `src/tryon/scroll-viewer.ts`, `studio.ts`, `studio-environment.ts`, `explode.ts`, `blueprint*.ts`: renderer, procedural studio environments, on-demand frames, exploded fit, blueprint pass.
+- `doc/feature/V2-LIGHTING.md`: V2 lighting specification (sections 1–3).
 
 ## Verification
 
-- `npm run typecheck`, `npm test` (69 tests) and `npm run build` pass after the revision. The only removed test is the obsolete ramp-ease self-check.
+- `npm run typecheck`, `npm test` (76 tests) and `npm run build` pass after the revision. The only removed test is the obsolete ramp-ease self-check.
 - The projection guard passes forward and reverse at both sizes, with the same evenness/spike limits and the 1.237 s first-camera pin. The camera-window offset is now zero in either direction.
 - The rewritten timeline test checks the full camera spans, effect windows, simultaneous turning/exploding at 25/50/75 %, midpoint handoff, effect exclusivity and integer states in both directions after resize rebuilds.
 - The fit test retains parked checks and unchanged every-mesh bbox-corner sampling every 0.01 timeline unit across 0↔1 and 1↔2 at both sizes, including simultaneous camera/explode movement. No NDC limits were relaxed.
