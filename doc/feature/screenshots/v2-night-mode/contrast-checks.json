@@ -1,0 +1,337 @@
+{
+  "method": "WCAG sRGB contrast, background sampled on a 2px grid across visible body and accent copy rectangles with text temporarily hidden; WebGL, linework and portrait fade preserved.",
+  "checks": [
+    {
+      "capture": "1920x945-angle-0",
+      "text": "Hand-polished Italian acetate, cut square and softened at every edge.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null
+    },
+    {
+      "capture": "1920x945-angle-1",
+      "text": "Tapered toward the tip for a light hold behind the ear.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null
+    },
+    {
+      "capture": "1920x945-angle-1",
+      "text": "Lens width and bridge, cut square from one piece.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null
+    },
+    {
+      "capture": "1920x945-angle-1",
+      "text": "Clear and ready for your prescription.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null
+    },
+    {
+      "capture": "1920x945-angle-2",
+      "text": "Looking down on the frame. All dimensions in mm.",
+      "color": "#8a8a8a",
+      "minimum": 4.77460201898009,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1920x945-angle-3",
+      "text": "Each hinge is riveted through the acetate, not glued on.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1920x945-angle-3",
+      "text": "Built to open and close for years without loosening.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1920x945-angle-3",
+      "text": "Buffed by hand to a deep, even gloss along the temple.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1920x945-angle-4",
+      "text": "FORMA Eyewear.",
+      "color": "#c98256",
+      "minimum": 5.1688649217428075,
+      "worst": "#222220"
+    },
+    {
+      "capture": "1920x945-angle-4",
+      "text": "The Ellis",
+      "color": "#c98256",
+      "minimum": 5.475841880147896,
+      "worst": "#1d1d1b"
+    },
+    {
+      "capture": "1920x945-angle-4",
+      "text": "Ink black acetate52–18–140",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1d1d1b"
+    },
+    {
+      "capture": "1920x945-angle-4",
+      "text": "Optical frameRectangle · Acetate · Ink black",
+      "color": "#ecebe7",
+      "minimum": 13.997036487907872,
+      "worst": "#1e1e1c"
+    },
+    {
+      "capture": "1440x900-angle-0",
+      "text": "Hand-polished Italian acetate, cut square and softened at every edge.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1e1e1c"
+    },
+    {
+      "capture": "1440x900-angle-1",
+      "text": "Tapered toward the tip for a light hold behind the ear.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1e1e1c"
+    },
+    {
+      "capture": "1440x900-angle-1",
+      "text": "Lens width and bridge, cut square from one piece.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1e1e1c"
+    },
+    {
+      "capture": "1440x900-angle-1",
+      "text": "Clear and ready for your prescription.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1e1e1c"
+    },
+    {
+      "capture": "1440x900-angle-2",
+      "text": "Looking down on the frame. All dimensions in mm.",
+      "color": "#8a8a8a",
+      "minimum": 4.77460201898009,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1440x900-angle-3",
+      "text": "Each hinge is riveted through the acetate, not glued on.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1440x900-angle-3",
+      "text": "Built to open and close for years without loosening.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1440x900-angle-3",
+      "text": "Buffed by hand to a deep, even gloss along the temple.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1440x900-angle-4",
+      "text": "FORMA Eyewear.",
+      "color": "#c98256",
+      "minimum": 5.1688649217428075,
+      "worst": "#222220"
+    },
+    {
+      "capture": "1440x900-angle-4",
+      "text": "The Ellis",
+      "color": "#c98256",
+      "minimum": 5.535573431064872,
+      "worst": "#1c1c1a"
+    },
+    {
+      "capture": "1440x900-angle-4",
+      "text": "Ink black acetate52–18–140",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1c1c1a"
+    },
+    {
+      "capture": "1440x900-angle-4",
+      "text": "Optical frameRectangle · Acetate · Ink black",
+      "color": "#ecebe7",
+      "minimum": 15.461722251809073,
+      "worst": "#141412"
+    },
+    {
+      "capture": "1024x768-angle-0",
+      "text": "Hand-polished Italian acetate, cut square and softened at every edge.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#141412"
+    },
+    {
+      "capture": "1024x768-angle-1",
+      "text": "Tapered toward the tip for a light hold behind the ear.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#141412"
+    },
+    {
+      "capture": "1024x768-angle-1",
+      "text": "Lens width and bridge, cut square from one piece.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#141412"
+    },
+    {
+      "capture": "1024x768-angle-1",
+      "text": "Clear and ready for your prescription.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#141412"
+    },
+    {
+      "capture": "1024x768-angle-2",
+      "text": "Looking down on the frame. All dimensions in mm.",
+      "color": "#8a8a8a",
+      "minimum": 4.77460201898009,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1024x768-angle-3",
+      "text": "Each hinge is riveted through the acetate, not glued on.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1024x768-angle-3",
+      "text": "Built to open and close for years without loosening.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1024x768-angle-3",
+      "text": "Buffed by hand to a deep, even gloss along the temple.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "1024x768-angle-4",
+      "text": "FORMA Eyewear.",
+      "color": "#c98256",
+      "minimum": 4.601084881265046,
+      "worst": "#2b2b29"
+    },
+    {
+      "capture": "1024x768-angle-4",
+      "text": "The Ellis",
+      "color": "#c98256",
+      "minimum": 5.535573431064872,
+      "worst": "#1c1c1a"
+    },
+    {
+      "capture": "1024x768-angle-4",
+      "text": "Ink black acetate52–18–140",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1c1c1a"
+    },
+    {
+      "capture": "1024x768-angle-4",
+      "text": "Optical frameRectangle · Acetate · Ink black",
+      "color": "#ecebe7",
+      "minimum": 13.680645967339656,
+      "worst": "#20201e"
+    },
+    {
+      "capture": "375x812-angle-0",
+      "text": "Hand-polished Italian acetate, cut square and softened at every edge.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#20201e"
+    },
+    {
+      "capture": "375x812-angle-1",
+      "text": "Tapered toward the tip for a light hold behind the ear.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#20201e"
+    },
+    {
+      "capture": "375x812-angle-1",
+      "text": "Lens width and bridge, cut square from one piece.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#20201e"
+    },
+    {
+      "capture": "375x812-angle-1",
+      "text": "Clear and ready for your prescription.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#20201e"
+    },
+    {
+      "capture": "375x812-angle-2",
+      "text": "Looking down on the frame. All dimensions in mm.",
+      "color": "#8a8a8a",
+      "minimum": 4.77460201898009,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "375x812-angle-3",
+      "text": "Each hinge is riveted through the acetate, not glued on.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "375x812-angle-3",
+      "text": "Built to open and close for years without loosening.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "375x812-angle-3",
+      "text": "Buffed by hand to a deep, even gloss along the temple.",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#1f1f1f"
+    },
+    {
+      "capture": "375x812-angle-4",
+      "text": "FORMA Eyewear.",
+      "color": "#c98256",
+      "minimum": 5.1688649217428075,
+      "worst": "#222220"
+    },
+    {
+      "capture": "375x812-angle-4",
+      "text": "The Ellis",
+      "color": "#c98256",
+      "minimum": 5.029813464947106,
+      "worst": "#252422"
+    },
+    {
+      "capture": "375x812-angle-4",
+      "text": "Ink black acetate52–18–140",
+      "color": "color(srgb 0.724902 0.718824 0.698824)",
+      "minimum": null,
+      "worst": "#252422"
+    },
+    {
+      "capture": "375x812-angle-4",
+      "text": "Optical frameRectangle · Acetate · Ink black",
+      "color": "#ecebe7",
+      "minimum": 13.197854647943878,
+      "worst": "#232321"
+    }
+  ]
+}

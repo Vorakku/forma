@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { ELLIS_OVERLAY_GLASS } from "./ellis";
+import type { V2Theme } from "./v2-theme";
 import { applyExitDolly, exitFrontPlane, type ExitDolly } from "./scroll-exit";
 import { sampleFrameSurface } from "./screen-motion";
 import { createStudio } from "./studio";
@@ -42,6 +44,14 @@ export function createScrollViewer({
   const anchors = new Map<string, THREE.Vector3>();
   let exitDolly: ExitDolly | undefined;
   let frontModel: THREE.Object3D | undefined;
+  let theme: V2Theme = "day";
+  const lenses = new Map<THREE.MeshPhysicalMaterial, { [K in keyof typeof ELLIS_OVERLAY_GLASS]: THREE.MeshPhysicalMaterial[K] }>();
+  const applyLensTheme = () => {
+    for (const [material, day] of lenses) {
+      Object.assign(material, theme === "night" ? ELLIS_OVERLAY_GLASS : day);
+      material.needsUpdate = true;
+    }
+  };
   const studio = createStudio(
     canvas,
     () => {
@@ -128,6 +138,7 @@ export function createScrollViewer({
     exploder?.set(0);
     exploder = undefined;
     anchors.clear();
+    lenses.clear();
     surfacePoints = [];
     disposeBlueprint();
     studio.dispose();
@@ -177,6 +188,25 @@ export function createScrollViewer({
       blueprint = undefined;
       const installed = studio.setObject(object);
       if (installed === false || installed === null) return installed;
+      lenses.clear();
+      object.traverse((node) => {
+        if (!(node instanceof THREE.Mesh)) return;
+        for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+          if (!(material instanceof THREE.MeshPhysicalMaterial) || material.transmission <= 0 || lenses.has(material)) continue;
+          lenses.set(material, {
+            transmission: material.transmission,
+            transparent: material.transparent,
+            opacity: material.opacity,
+            clearcoat: material.clearcoat,
+            clearcoatRoughness: material.clearcoatRoughness,
+            depthWrite: material.depthWrite,
+            thickness: material.thickness,
+            attenuationDistance: material.attenuationDistance,
+            envMapIntensity: material.envMapIntensity,
+          });
+        }
+      });
+      applyLensTheme();
       exploder = createExploder(object, EXPLODE_MM);
       shadowDirty = true;
       lastExplode = 0;
@@ -206,6 +236,13 @@ export function createScrollViewer({
       );
       if (blueprintTokens) blueprint.recolor(blueprintTokens);
       return installed;
+    },
+    setTheme(next: V2Theme) {
+      if (stopped || next === theme) return;
+      theme = next;
+      applyLensTheme();
+      renderRevision++;
+      render();
     },
     getAnchor(name: string) {
       return anchors.get(name)?.clone();

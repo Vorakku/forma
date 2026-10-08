@@ -812,3 +812,182 @@ test("early exit touch scrub returns to Front with the finale copy visible", asy
       await expect(mark).toHaveCSS("display", angle === 3 ? "none" : "inline");
   }
 });
+
+ test("Night mode toggles tokens, persists reload and keeps controls independent of angles", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/v2-demo");
+  const stage = await ready(page);
+  const button = page.getByRole("button", { name: "Night mode" });
+  await expect(button).toHaveAttribute("aria-pressed", "false");
+  await expect(button.locator("svg")).toHaveClass(/lucide-moon/);
+  await button.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "night");
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+  await expect(button.locator("svg")).toHaveClass(/lucide-sun/);
+  expect(await page.evaluate(() => localStorage.getItem("forma.v2.theme"))).toBe("night");
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--paper").trim())).toBe("#262624");
+  await expect(page.locator(".site-header")).toHaveCSS("background-color", "rgb(38, 38, 36)");
+  await page.reload();
+  await ready(page);
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+  for (let angle = 0; angle < 5; angle++) {
+    if (angle) await page.keyboard.press("ArrowDown");
+    await landed(page, angle);
+    if (angle === 2) {
+      await expect(button).toBeHidden();
+      expect(await page.getByRole("button", { name: "Night mode", includeHidden: true }).evaluate(element => { element.focus(); return document.activeElement === element; })).toBe(false);
+    } else {
+      await expect(button).toBeVisible();
+      await button.focus();
+      await page.keyboard.press("Space");
+      await page.keyboard.press("Space");
+      await landed(page, angle);
+      await button.hover();
+      await page.mouse.wheel(0, 100);
+      await landed(page, angle);
+      await button.evaluate(element => element.blur());
+    }
+  }
+});
+
+ test("night finale exit removes theme and restores home day tokens", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/v2-demo");
+  const stage = await ready(page);
+  const dayPaper = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--paper").trim());
+  await page.getByRole("button", { name: "Night mode" }).click();
+  await page.keyboard.press("End");
+  await landed(page, 4);
+  // Click guard applies as soon as a reversible exit scrub starts, as well as after commit.
+  await stage.evaluate(element => element.setAttribute("data-exit", "0.1"));
+  await page.getByRole("button", { name: "Night mode" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "night");
+  await stage.evaluate(element => element.removeAttribute("data-exit"));
+  await page.keyboard.press("ArrowDown");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme");
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--paper").trim())).toBe(dayPaper);
+  await expect(page.locator("main h1").first()).toBeFocused();
+  await expect(page.locator(".site-header")).toHaveCSS("background-color", "rgb(255, 255, 255)");
+});
+
+ for (const theme of ["day", "night"] as const) {
+  test(theme + " landed frames stay identical at every angle", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/v2-demo");
+    const stage = await ready(page);
+    if (theme === "night") await page.getByRole("button", { name: "Night mode" }).click();
+    await page.getByRole("button", { name: "Night mode" }).evaluate(element => element.blur());
+    await page.mouse.move(1, 1);
+    for (let angle = 0; angle < 5; angle++) {
+      if (angle) await page.keyboard.press("ArrowDown");
+      await landed(page, angle);
+      const still = await stage.screenshot();
+      await page.waitForTimeout(200);
+      expect((await stage.screenshot()).equals(still)).toBe(true);
+    }
+  });
+}
+
+ test("native night crossfade lasts 300ms and ignores rapid clicks until finished", async ({ page }) => {
+  await page.goto("/v2-demo");
+  await ready(page);
+  expect(await page.evaluate(() => typeof document.startViewTransition)).toBe("function");
+  await page.evaluate(() => {
+    const start = document.startViewTransition.bind(document);
+    (window as any).themeTransitions = [];
+    document.startViewTransition = ((apply: () => void) => {
+      const transition = start(apply);
+      (window as any).themeTransitions.push(transition);
+      return transition;
+    }) as typeof document.startViewTransition;
+    const button = document.querySelector<HTMLButtonElement>(".v2-demo-night-toggle")!;
+    button.click();
+    button.click();
+  });
+  await page.evaluate(async () => {
+    const transition = (window as any).themeTransitions[0];
+    await transition.ready;
+    (window as any).themeAnimationDurations = document.getAnimations().filter(animation => {
+      const effect = animation.effect as KeyframeEffect;
+      return effect.pseudoElement?.startsWith("::view-transition");
+    }).map(animation => animation.effect!.getTiming().duration);
+    await transition.finished;
+  });
+  expect(await page.evaluate(() => (window as any).themeTransitions.length)).toBe(1);
+  const durations = await page.evaluate(() => (window as any).themeAnimationDurations);
+  expect(durations.length).toBeGreaterThan(0);
+  expect(durations.every((duration: number) => duration === 300)).toBe(true);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "night");
+  await page.getByRole("button", { name: "Night mode" }).click();
+  await page.evaluate(() => (window as any).themeTransitions[1].finished);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "day");
+});
+
+ for (const instant of ["reduced motion", "unsupported API"] as const) {
+  test("night switches instantly with " + instant, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: instant === "reduced motion" ? "reduce" : "no-preference" });
+    await page.goto("/v2-demo");
+    await ready(page);
+    const result = await page.evaluate(mode => {
+      if (mode === "unsupported API") Object.defineProperty(document, "startViewTransition", { configurable: true, value: undefined });
+      else document.startViewTransition = (() => { throw Error("reduced motion must not start a transition"); }) as typeof document.startViewTransition;
+      document.querySelector<HTMLButtonElement>(".v2-demo-night-toggle")!.click();
+      return { theme: document.documentElement.dataset.theme, pressed: document.querySelector(".v2-demo-night-toggle")!.getAttribute("aria-pressed"), animations: document.getAnimations().length };
+    }, instant);
+    expect(result).toEqual({ theme: "night", pressed: "true", animations: 0 });
+  });
+}
+
+ test("touching Night mode toggles without capturing a stage gesture", async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true, viewport: { width: 375, height: 812 }, baseURL: "http://localhost:4176", reducedMotion: "reduce" });
+  const page = await context.newPage();
+  try {
+    await page.goto("/v2-demo");
+    await ready(page);
+    await page.getByRole("button", { name: "Night mode" }).tap();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "night");
+    await landed(page, 0);
+  } finally {
+    await context.close();
+  }
+});
+
+test("night button clears visible copy and navigation at all review sizes", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  for (const viewport of [{ width: 1920, height: 945 }, { width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 375, height: 812 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/v2-demo");
+    await ready(page);
+    const button = page.getByRole("button", { name: "Night mode" });
+    if (await button.getAttribute("aria-pressed") === "false") await button.click();
+    for (let angle = 0; angle < 5; angle++) {
+      if (angle) await page.keyboard.press("ArrowDown");
+      await landed(page, angle);
+      if (angle === 2) continue;
+      const result = await button.evaluate(element => {
+        const r = element.getBoundingClientRect();
+        const selectors = ".v2-demo-copy h1,.v2-demo-copy h2 span,.v2-demo-copy p,.v2-demo-part h2,.v2-demo-part > span,.v2-demo-finale .eyebrow,.finale-aside em,.main-nav a";
+        return { width: r.width, height: r.height, top: r.top, right: innerWidth - r.right, overflow: document.documentElement.scrollWidth > innerWidth, clickable: !!document.elementFromPoint(r.x + 22, r.y + 22)?.closest(".v2-demo-night-toggle"), collisions: [...document.querySelectorAll(selectors)].filter(copy => {
+          const b = copy.getBoundingClientRect();
+          return b.width && getComputedStyle(copy).visibility !== "hidden" && b.left < r.right && b.right > r.left && b.top < r.bottom && b.bottom > r.top;
+        }).map(copy => copy.textContent) };
+      });
+      expect(result).toEqual({ width: 44, height: 44, top: 104, right: 24, overflow: false, clickable: true, collisions: [] });
+    }
+  }
+});
+
+test("leaving during a pending night transition cannot leak root theme", async ({ page }) => {
+  await page.goto("/v2-demo");
+  await ready(page);
+  await page.evaluate(() => {
+    document.querySelector<HTMLButtonElement>(".v2-demo-night-toggle")!.click();
+    document.querySelector<HTMLAnchorElement>(".wordmark")!.click();
+  });
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator("main h1").first()).toBeVisible();
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme");
+  await page.waitForTimeout(400);
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme");
+});

@@ -15,7 +15,7 @@ const output = resolve(".sites-runtime/viewer-tests.mjs");
 await build({
   stdin: {
     contents:
-      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './screen-motion';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';export * from './studio-environment';",
+      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './screen-motion';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';export * from './studio-environment';export * from './v2-theme';",
     resolveDir: resolve("src/tryon"),
   },
   outfile: output,
@@ -73,6 +73,9 @@ const {
   saveBlueprintTheme,
   BLUEPRINT_THEME_KEY,
   buildEllis,
+  readV2Theme,
+  saveV2Theme,
+  V2_THEME_KEY,
 } = await import(pathToFileURL(output));
 after(() => rm(output, { force: true }));
 const product = (overrides = {}) => ({
@@ -1908,4 +1911,69 @@ test("V2 uses fixed Neutral tone mapping at exposure 1.0 through motion and blue
   assert.equal(h.callbacks.size, 0);
   assert.equal(renderer.getRenderTarget(), null);
   viewer.dispose();
+});
+
+test("V2 night switches the shared lenses in place and day restores every original glass property", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => h.errors.push("failed") });
+  const object = buildDisplayGlasses(product(), 0);
+  viewer.setObject(object);
+  const left = object.getObjectByName("lens_L"), right = object.getObjectByName("lens_R");
+  assert.equal(left.material, right.material);
+  const glass = left.material;
+  const keys = ["transmission", "opacity", "transparent", "depthWrite", "clearcoat", "clearcoatRoughness", "thickness", "attenuationDistance", "envMapIntensity", "roughness", "ior"];
+  const snapshot = material => Object.fromEntries(keys.map(key => [key, material[key]]));
+  const day = snapshot(glass), radius = viewer.radius, anchor = viewer.getAnchor("front_frame"), geometry = left.geometry;
+  viewer.setPose(resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor)[0]);
+  const renders = h.renderers[0].renders;
+  const overlay = buildEllis(undefined, { overlay: true });
+  viewer.setTheme("night");
+  assert.deepEqual(snapshot(glass), snapshot(overlay.getObjectByName("lens_L").material));
+  assert.equal(h.renderers[0].renders, renders + 1);
+  assert.equal(left.geometry, geometry);
+  assert.equal(left.material, glass);
+  assert.equal(viewer.radius, radius);
+  assert.deepEqual(viewer.getAnchor("front_frame"), anchor);
+  const version = glass.version;
+  viewer.setTheme("night");
+  assert.equal(glass.version, version);
+  viewer.setTheme("day");
+  assert.deepEqual(snapshot(glass), day);
+  assert.ok(glass.version > version);
+  assert.equal(h.renderers[0].renders, renders + 2);
+  assert.deepEqual(h.errors, []);
+  disposeObject(overlay);
+  viewer.dispose();
+});
+
+test("a stored V2 night theme applies before the first frame and ignores disposal", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => {} });
+  viewer.setTheme("night");
+  const object = buildDisplayGlasses(product(), 0);
+  const material = object.getObjectByName("lens_L").material;
+  viewer.setObject(object);
+  assert.equal(material.transmission, 0);
+  assert.equal(material.opacity, 0.1);
+  assert.equal(material.transparent, true);
+  assert.equal(h.renderers[0].renders, 0);
+  viewer.setPose(resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor)[0]);
+  assert.equal(h.renderers[0].renders, 1);
+  assert.equal(material.transmission, 0);
+  viewer.dispose();
+  assert.doesNotThrow(() => viewer.setTheme("day"));
+});
+
+test("V2 theme defaults to day, validates stored choices and tolerates denied storage", () => {
+  assert.equal(V2_THEME_KEY, "forma.v2.theme");
+  for (const value of [null, "day", "blue", "Night", ""])
+    assert.equal(readV2Theme(() => ({ getItem: key => { assert.equal(key, V2_THEME_KEY); return value; } })), "day");
+  assert.equal(readV2Theme(() => ({ getItem: () => "night" })), "night");
+  assert.equal(readV2Theme(() => { throw Error("denied"); }), "day");
+  assert.equal(readV2Theme(() => ({ getItem: () => { throw Error("denied"); } })), "day");
+  const writes = [];
+  saveV2Theme(() => ({ setItem: (...args) => writes.push(args) }), "night");
+  assert.deepEqual(writes, [[V2_THEME_KEY, "night"]]);
+  assert.doesNotThrow(() => saveV2Theme(() => { throw Error("denied"); }, "night"));
+  assert.doesNotThrow(() => saveV2Theme(() => ({ setItem: () => { throw Error("denied"); } }), "day"));
 });

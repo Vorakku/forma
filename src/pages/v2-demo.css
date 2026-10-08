@@ -1,3 +1,55 @@
+:root[data-theme="night"] {
+  --ink: #ecebe7;
+  --muted: #8f8d87;
+  --line: #2b2a27;
+  --paper: #262624;
+  --soft: #141412;
+  --warm: #c98256;
+  color-scheme: dark;
+}
+:root[data-theme="night"] .site-header {
+  background: var(--paper);
+}
+:root[data-theme="night"]:not([data-mode="blueprint"]) :focus-visible {
+  outline-color: var(--warm);
+}
+:root[data-theme="night"] .v2-demo-copy .muted,
+:root[data-theme="night"] .finale-aside p {
+  color: color-mix(in srgb, var(--muted) 55%, var(--ink));
+}
+:root[data-theme="night"] .finale-cta {
+  color: var(--soft);
+}
+:root[data-theme="day"]::view-transition-group(root),
+:root[data-theme="night"]::view-transition-group(root),
+:root[data-theme="day"]::view-transition-old(root),
+:root[data-theme="day"]::view-transition-new(root),
+:root[data-theme="night"]::view-transition-old(root),
+:root[data-theme="night"]::view-transition-new(root) {
+  animation-duration: 300ms;
+}
+.v2-demo-night-toggle {
+  position: absolute;
+  z-index: 21; /* Above the header navigation row; below the exit paper. */
+  right: 24px;
+  top: 104px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  touch-action: manipulation;
+  opacity: var(--exit-chrome-opacity, 1);
+}
+:root[data-mode="blueprint"] .v2-demo-night-toggle {
+  visibility: hidden;
+}
+
 .v2-demo-stage {
   position: relative;
   height: 100svh;
@@ -640,4 +692,12 @@
   stroke: color-mix(in srgb, var(--ink) 74%, transparent);
   stroke-width: 5;
   stroke-linecap: round;
+}
+
+/* Reserve the button's fixed corner when the tablet navigation row is full. */
+@media (min-width: 761px) and (max-width: 1100px) {
+  :root[data-theme] .site-header .main-nav {
+    margin-right: 84px;
+    gap: 18px;
+  }
 }

@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { Moon, Sun } from "lucide-react";
+import { readV2Theme, saveV2Theme, type V2Theme } from "@/tryon/v2-theme";
 import { Link } from "react-router-dom";
 import { gsap } from "gsap";
 import { Observer } from "gsap/Observer";
@@ -277,6 +280,44 @@ function V2Stage({
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
   const [angle, setAngle] = useState(0);
+  const [dayNightTheme, setDayNightTheme] = useState(() => readV2Theme(() => window.localStorage));
+  const dayNightChoice = useRef(dayNightTheme);
+  const applyDayNight = useRef<(theme: V2Theme) => void>(() => {});
+  const themeTransition = useRef<ViewTransition | null>(null);
+  const themeMounted = useRef(false);
+  useLayoutEffect(() => {
+    themeMounted.current = true;
+    document.documentElement.dataset.theme = dayNightChoice.current;
+    return () => {
+      themeMounted.current = false;
+      themeTransition.current?.skipTransition();
+      themeTransition.current = null;
+      document.documentElement.removeAttribute("data-theme");
+    };
+  }, []);
+  const chooseDayNight = () => {
+    if (themeTransition.current || stage.current?.hasAttribute("data-exiting") || stage.current?.hasAttribute("data-exit")) return;
+    const next: V2Theme = dayNightChoice.current === "day" ? "night" : "day";
+    const apply = () => {
+      if (!themeMounted.current || stage.current?.hasAttribute("data-exiting") || stage.current?.hasAttribute("data-exit")) return;
+      dayNightChoice.current = next;
+      flushSync(() => setDayNightTheme(next));
+      document.documentElement.dataset.theme = next;
+      applyDayNight.current(next);
+      saveV2Theme(() => window.localStorage, next);
+    };
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !document.startViewTransition) {
+      apply();
+      return;
+    }
+    const transition = document.startViewTransition(apply);
+    themeTransition.current = transition;
+    // A skipped transition can reject ready; finished still releases the click guard.
+    void transition.ready.catch(() => {});
+    void transition.finished.finally(() => {
+      if (themeTransition.current === transition) themeTransition.current = null;
+    }).catch(() => {});
+  };
   const [theme, setTheme] = useState(() =>
     readBlueprintTheme(() => window.localStorage),
   );
@@ -314,6 +355,7 @@ function V2Stage({
         root.removeAttribute("data-mode");
         root.removeAttribute("data-blueprint-theme");
         applyTheme.current = () => {};
+        applyDayNight.current = () => {};
       };
       try {
         viewer = createScrollViewer({
@@ -325,6 +367,8 @@ function V2Stage({
           onResize: () => refreshPose(),
         });
         viewer.setObject(buildDisplayGlasses(product, 0));
+        viewer.setTheme(dayNightChoice.current);
+        applyDayNight.current = (choice) => viewer?.setTheme(choice);
         root.dataset.blueprintTheme = themeChoice.current;
         const recolor = () =>
           viewer!.setBlueprintTokens(
@@ -532,6 +576,7 @@ function V2Stage({
               preventDefault: true,
               ignoreCheck: (event) => {
                 const input = event as WheelEvent;
+                if (event.target instanceof Element && event.target.closest(".v2-demo-night-toggle")) return true;
                 return !acceptsStepInput({
                   type: "wheel",
                   at: input.timeStamp,
@@ -567,7 +612,7 @@ function V2Stage({
               ignoreCheck: (event) =>
                 blocked(event.target) ||
                 (event.target instanceof Element &&
-                  !!event.target.closest(".v2-demo-theme, .finale-cta")) ||
+                  !!event.target.closest(".v2-demo-theme, .v2-demo-night-toggle, .finale-cta")) ||
                 ("touches" in event &&
                   (event as TouchEvent).touches.length > 1),
               onPress: () => {
@@ -759,6 +804,17 @@ function V2Stage({
             )}
           </div>
         </>
+      )}
+      {ready && !unavailable && (
+        <button
+          className="v2-demo-night-toggle"
+          type="button"
+          aria-label="Night mode"
+          aria-pressed={dayNightTheme === "night"}
+          onClick={chooseDayNight}
+        >
+          {dayNightTheme === "night" ? <Sun size={18} strokeWidth={1.5} /> : <Moon size={18} strokeWidth={1.5} />}
+        </button>
       )}
       <div className="v2-demo-paper" aria-hidden="true" />
       <span className="v2-demo-announcement" aria-live="polite">
