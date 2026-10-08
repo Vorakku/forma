@@ -39,14 +39,6 @@ import "./v2-demo.css";
 
 gsap.registerPlugin(Observer, useGSAP);
 
-function headerOpacity(time: number, last: number) {
-  return gsap.utils.clamp(
-    0,
-    1,
-    Math.max(1 - time / 0.4, 1 - (last - time) / 0.4),
-  );
-}
-
 // Exploded-angle callouts; sizes come from the reference model's design.json.
 const PARTS = [
   { id: "temples", name: "Temples", size: "140 mm", line: "Tapered toward the tip for a light hold behind the ear." },
@@ -466,9 +458,7 @@ function V2Stage({
           root.dataset.mode = pose.blueprint >= 0.5 ? "blueprint" : "studio";
           viewer!.setPose(pose);
           if (header)
-            gsap.set(header, {
-              autoAlpha: u > 0 ? Math.max(0, 1 - u / 0.25) : headerOpacity(timeline.time(), last),
-            });
+            header.style.setProperty("--v2-header-exit-opacity", String(Math.max(0, 1 - u / 0.25)));
         };
         timeline = gsap.timeline({ paused: true, onUpdate: update });
         populateScrollTimeline(timeline, pose, poses(), budget);
@@ -612,7 +602,7 @@ function V2Stage({
               ignoreCheck: (event) =>
                 blocked(event.target) ||
                 (event.target instanceof Element &&
-                  !!event.target.closest(".v2-demo-theme, .v2-demo-night-toggle, .finale-cta")) ||
+                  !!event.target.closest(".v2-demo-theme, .v2-demo-night-toggle")) ||
                 ("touches" in event &&
                   (event as TouchEvent).touches.length > 1),
               onPress: () => {
@@ -683,9 +673,8 @@ function V2Stage({
           live = false;
           exitHold?.kill();
           media.revert();
-          // The header survives route navigation; discard the demo's inline fade.
-          header?.style.removeProperty("opacity");
-          header?.style.removeProperty("visibility");
+          // The header survives route navigation; discard the demo's exit fade.
+          header?.style.removeProperty("--v2-header-exit-opacity");
           clearMode();
           refreshPose = () => {};
           timeline.kill();
@@ -789,19 +778,6 @@ function V2Stage({
               <br />
               Rectangle · Acetate · Ink black
             </p>
-            {withLinks ? (
-              <Link
-                className="finale-cta"
-                to="/product/the-ellis"
-                aria-label="Shop The Ellis"
-              >
-                →
-              </Link>
-            ) : (
-              <span className="finale-cta" aria-hidden="true">
-                →
-              </span>
-            )}
           </div>
         </>
       )}

@@ -61,6 +61,38 @@ async function capture(page: Page, angle: number) {
     );
 }
 
+test("navbar fades on arrival, reveals near the top at every angle and supports keyboard focus", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/v2-demo");
+  await ready(page);
+  const header = page.locator(".site-header");
+  await expect(header).toHaveCSS("opacity", "0");
+  await expect(header).toHaveCSS("pointer-events", "none");
+  for (let angle = 0; angle < SCROLL_ANGLES.length; angle++) {
+    if (angle) await page.keyboard.press("ArrowDown");
+    await landed(page, angle);
+    if (angle === SCROLL_ANGLES.length - 1) {
+      await expect(page.locator(".finale-cta")).toHaveCount(0);
+      await expect(page.getByRole("link", { name: "Shop The Ellis" })).toHaveCount(0);
+    }
+    const height = (await header.boundingBox())!.height;
+    await page.mouse.move(900, height + 16);
+    await expect(header).toHaveCSS("opacity", "1");
+    await page.mouse.move(900, height - 16);
+    await expect(header).toHaveCSS("pointer-events", "auto");
+    await page.mouse.move(900, 600);
+    await expect(header).toHaveCSS("opacity", "0");
+  }
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(header).toHaveCSS("opacity", "1");
+  await expect(page.getByRole("link", { name: "A better way to see" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/guide$/);
+  await expect(header).toHaveCSS("opacity", "1");
+  await expect(header).toHaveCSS("pointer-events", "auto");
+});
+
 test("cold arrival, one notch/burst per angle, integer landings, keys and navigation cleanup", async ({
   page,
 }) => {
@@ -78,7 +110,7 @@ test("cold arrival, one notch/burst per angle, integer landings, keys and naviga
   await expect(stage.locator("canvas")).toHaveAttribute("role", "img");
   await expect(stage.locator("canvas")).not.toHaveAttribute("tabindex", "0");
   const header = page.locator(".site-header");
-  await expect(header).toHaveCSS("opacity", "1");
+  await expect(header).toHaveCSS("opacity", "0");
   expect((await stage.boundingBox())!.y).toBe(0);
   expect((await stage.boundingBox())!.height).toBe(1018);
   expect(
@@ -90,7 +122,7 @@ test("cold arrival, one notch/burst per angle, integer landings, keys and naviga
   await page.mouse.move(900, 600);
   await page.mouse.wheel(0, 100);
   await landed(page, 1);
-  await expect(header).toBeHidden();
+  await expect(header).toHaveCSS("opacity", "0");
   captures.push(await capture(page, 1));
   if (process.env.CAPTURE_SCREENSHOTS === "1")
     await stage.screenshot({ path: "/tmp/forma-v2-angle-1-exploded.png" });
@@ -102,11 +134,11 @@ test("cold arrival, one notch/burst per angle, integer landings, keys and naviga
     );
     await landed(page, index);
     captures.push(await capture(page, index));
-    if (index < SCROLL_ANGLES.length - 1) await expect(header).toBeHidden();
+    if (index < SCROLL_ANGLES.length - 1) await expect(header).toHaveCSS("opacity", "0");
   }
   for (let n = 1; n < captures.length; n++)
     expect(captures[n].equals(captures[n - 1])).toBeFalsy();
-  await expect(header).toHaveCSS("opacity", "1");
+  await expect(header).toHaveCSS("opacity", "0");
   await expect(page.locator(".site-footer")).toHaveCount(0);
   await page.keyboard.press("Home");
   await landed(page, 0);
@@ -115,6 +147,8 @@ test("cold arrival, one notch/burst per angle, integer landings, keys and naviga
   await landed(page, 1);
   await page.keyboard.press("End");
   await landed(page, SCROLL_ANGLES.length - 1);
+  await page.mouse.move(900, 20);
+  await expect(page.locator(".site-header")).toHaveCSS("opacity", "1");
   await page
     .getByRole("link", { name: "All eyewear", exact: true })
     .first()
@@ -223,6 +257,7 @@ test("cart drawer retains wheel scrolling; ignored wheel and focused controls ke
     return [arrow.defaultPrevented, space.defaultPrevented];
   });
   expect(defaults).toEqual([false, false]);
+  await page.mouse.move(900, 20);
   await page.getByRole("button", { name: /Shopping bag/ }).click();
   const drawer = page.getByRole("dialog");
   await expect(drawer).toBeVisible();
@@ -282,7 +317,7 @@ test("reduced motion cuts synchronously once per gesture and changes live", asyn
   await landed(page, 2);
   await page.keyboard.press("End");
   await landed(page, SCROLL_ANGLES.length - 1);
-  await expect(page.locator(".site-header")).toHaveCSS("opacity", "1");
+  await expect(page.locator(".site-header")).toHaveCSS("opacity", "0");
 });
 
 test("context loss in blueprint restores the header, removes root state and stops input handling", async ({
@@ -483,7 +518,7 @@ test("blueprint swatches use keyboard toggles, persist Blue, and remove root sta
   await page.keyboard.press("ArrowDown");
   await landed(page, 2);
   await expect(control).toBeVisible();
-  await expect(page.locator(".site-header")).toBeHidden();
+  await expect(page.locator(".site-header")).toHaveCSS("opacity", "0");
   await expect(ink).toHaveAttribute("aria-pressed", "true");
   if (process.env.CAPTURE_SCREENSHOTS === "1")
     await stage.screenshot({ path: "/tmp/forma-v2-blueprint-ink.png" });
@@ -520,6 +555,8 @@ test("blueprint swatches use keyboard toggles, persist Blue, and remove root sta
   );
   await page.keyboard.press("End");
   await landed(page, SCROLL_ANGLES.length - 1);
+  await page.mouse.move(900, 20);
+  await expect(page.locator(".site-header")).toHaveCSS("opacity", "1");
   await page
     .getByRole("link", { name: "All eyewear", exact: true })
     .first()
@@ -968,12 +1005,12 @@ test("night button clears visible copy and navigation at all review sizes", asyn
       const result = await button.evaluate(element => {
         const r = element.getBoundingClientRect();
         const selectors = ".v2-demo-copy h1,.v2-demo-copy h2 span,.v2-demo-copy p,.v2-demo-part h2,.v2-demo-part > span,.v2-demo-finale .eyebrow,.finale-aside em,.main-nav a";
-        return { width: r.width, height: r.height, top: r.top, right: innerWidth - r.right, overflow: document.documentElement.scrollWidth > innerWidth, clickable: !!document.elementFromPoint(r.x + 22, r.y + 22)?.closest(".v2-demo-night-toggle"), collisions: [...document.querySelectorAll(selectors)].filter(copy => {
+        return { width: r.width, height: r.height, bottom: innerHeight - r.bottom, left: r.left, overflow: document.documentElement.scrollWidth > innerWidth, clickable: !!document.elementFromPoint(r.x + 22, r.y + 22)?.closest(".v2-demo-night-toggle"), collisions: [...document.querySelectorAll(selectors)].filter(copy => {
           const b = copy.getBoundingClientRect();
           return b.width && getComputedStyle(copy).visibility !== "hidden" && b.left < r.right && b.right > r.left && b.top < r.bottom && b.bottom > r.top;
         }).map(copy => copy.textContent) };
       });
-      expect(result).toEqual({ width: 44, height: 44, top: 104, right: 24, overflow: false, clickable: true, collisions: [] });
+      expect(result).toEqual({ width: 44, height: 44, bottom: 24, left: 24, overflow: false, clickable: true, collisions: [] });
     }
   }
 });

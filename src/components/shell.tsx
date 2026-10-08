@@ -63,6 +63,37 @@ export function Shell() {
   // The V2 demo is one full-screen scroll animation: the header floats over it
   // and there is no footer to scroll into.
   const immersive = location.pathname === "/v2-demo";
+  const [headerRevealed, setHeaderRevealed] = useState(true);
+  useEffect(() => {
+    if (!immersive) return;
+    setHeaderRevealed(true);
+    const arrival = window.setTimeout(() => setHeaderRevealed(false), 250);
+    let pointerX = 0;
+    let pointerY = 0;
+    const pointerMove = (event: PointerEvent) => {
+      if (event.pointerType === "touch") return;
+      // Browsers can send a stationary pointer event when the page appears.
+      if (event.clientX === pointerX && event.clientY === pointerY) return;
+      pointerX = event.clientX;
+      pointerY = event.clientY;
+      window.clearTimeout(arrival);
+      const header = document.querySelector<HTMLElement>(".site-header");
+      const revealHeight = Math.max(120, (header?.offsetHeight ?? 0) + 24);
+      setHeaderRevealed(event.clientY <= revealHeight);
+    };
+    const pointerLeave = (event: PointerEvent) => {
+      if (event.relatedTarget !== null) return;
+      window.clearTimeout(arrival);
+      setHeaderRevealed(false);
+    };
+    window.addEventListener("pointermove", pointerMove);
+    document.addEventListener("pointerout", pointerLeave);
+    return () => {
+      window.clearTimeout(arrival);
+      window.removeEventListener("pointermove", pointerMove);
+      document.removeEventListener("pointerout", pointerLeave);
+    };
+  }, [immersive]);
   return (
     <>
       <a className="skip-link" href="#main">
@@ -70,6 +101,7 @@ export function Shell() {
       </a>
       <header
         className={`site-header${immersive ? " site-header-floating" : ""}`}
+        data-revealed={immersive && headerRevealed ? "true" : undefined}
       >
         <div className="header-main">
           <div className="header-left">

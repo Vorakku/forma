@@ -45,7 +45,7 @@ Notes:
 - **The exit's paper layer** (`.v2-demo-paper`) uses `--paper`, so at night the zoom-through ends on charcoal. That's correct.
 - **The grounding shadow** is a `ShadowMaterial` that darkens. On charcoal it becomes faint. Accept that in Phase 1; the torch phase will revisit it.
 - **Hard-coded light colours that need a night override,** scoped to `[data-theme="night"]`:
-  - `.site-header` has `background: white` in `styles.css`. On the online route it shows over the demo at the first and last angle. Override it to `var(--paper)`.
+  - `.site-header` has `background: white` in `styles.css`. On the online route it reveals near the top of the screen at every angle. Override it to `var(--paper)`.
   - The global focus ring is `#8c5535`. Use `var(--warm)` at night so it keeps contrast.
   - `.finale-cta` has white text on `--warm`. Check the contrast with the lighter warm (AA for 1.25rem bold text, 3:1 minimum); darken `--warm` if it fails.
 - **Contrast:** check `--muted` body copy against `--soft` and against `--paper` at AA (4.5:1). The copy sits over the pool, so measure where it actually sits in the screenshots.
@@ -68,7 +68,7 @@ Fix, at night only:
 
 - A 44 × 44px round icon button with a 1px `--line` border on `--paper`, and an `--ink` icon. Use `Moon` in day mode and `Sun` at night, from `lucide-react` (already a dependency), 18px, stroke 1.5.
 - Give it `aria-pressed={night}` and a constant `aria-label="Night mode"`. Its focus ring follows the existing button focus style.
-- **Placement:** top-right of the stage, at `right: 24px` and **`top: 104px`**, which keeps it clear of the 88px site header that shows over the stage at the first and last angle. Use the same position on the offline demo.
+- **Placement (updated by the owner on 2026-10-08):** bottom-left of the stage, inset 24px from the left and bottom, respecting larger safe-area insets. Use the same position on the offline demo. The finale footer reserves space beside the button.
 - **Hide it on the blueprint angle** with the existing `:root[data-mode="blueprint"]` hook, the same way the swatches are shown. The blueprint looks the same in both themes, and this keeps the narrow blueprint title sheet in the top-right corner free.
 - Exclude it from scroll and gesture capture the same way `.v2-demo-theme` and `.finale-cta` are (`event.target.closest(...)`, around `v2-demo.tsx:568`).
 - After implementing, check every angle at the four test viewports. **If the button overlaps any copy, move the copy, not the button**, and list what you moved in the result.
@@ -168,3 +168,8 @@ Only the pool tokens were tuned: paper is slightly darker to make the supplied m
 **Screenshots:** [screenshots/v2-night-mode/](screenshots/v2-night-mode/) contains all five night angles at 1920 × 945, 1440 × 900, 1024 × 768 and 375 × 812, plus angle 0 in day and its [day/night comparison](screenshots/v2-night-mode/1920x945-angle-0-day-vs-night.png). These final captures show the online header where applicable; offline button placement was also checked at localhost:4175. `contrast-checks.json` records background samples, and `day-comparison.json` records comparison with pre-theme online captures at 1920 × 945. Outside the button area, day angles 0/2/3 match exactly; angles 1/4 differ by at most one 8-bit channel level in software WebGL (no differences greater than one).
 
 **Verification:** Node 24.18.0; **98/98 unit tests pass**, typecheck and build pass. Final V2 scroll E2E results will be recorded when the full run finishes.
+
+
+## Navbar and button placement update — 2026-10-08
+
+The owner requested that the navbar fade out on entry and reveal when the mouse approaches the top, and that the day/night control move to the bottom-left. The toggle now uses a 24px bottom/left inset with safe-area support. The finale footer starts at 88px to clear the control. The mobile hinge copy has at least 88px of bottom padding so its final note clears the button. The owner also requested removing the last-angle arrow button; both its online link and offline decoration are removed. The earlier tablet navigation margin workaround is removed. The navbar reveal works at every angle and retains keyboard and touch access.
