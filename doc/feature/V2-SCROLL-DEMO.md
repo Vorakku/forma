@@ -43,21 +43,25 @@ Effect duration constants and `OVERLAP_S` have been removed. Effect speed follow
 
 ## Lighting
 
-V2 uses a procedural PMREM studio environment: `?env=strip` (default; unknown values also use strip), `?env=soft`, or `?env=window`. Only the selected environment is built, and its panel/shell resources are released after conversion. The shop viewer keeps `RoomEnvironment`; try-on lighting and lens materials are unchanged.
+V2 uses a procedural PMREM studio environment: `?env=strip` (default; unknown values also use strip), `?env=soft`, or `?env=window`. Only the selected environment is built, and its panel/shell resources are released after conversion. The shop viewer keeps `RoomEnvironment`, floor opacity 0.035, PCF shadows and ACES at exposure 1.45; try-on lighting and lens materials are unchanged.
 
-Each `SCROLL_ANGLES` row owns the key, hemisphere, environment intensity, yaw and CSS pool. `pose.light` follows timeline time linearly across the existing camera window; `resolveLight` blends scalars and linear colours and takes the shortest key azimuth path. It adds no time and cuts with the pose for reduced motion.
+Each `SCROLL_ANGLES` row owns the key, hemisphere, environment intensity, yaw, floor-shadow opacity and CSS pool. `pose.light` follows timeline time linearly across the existing camera window; `resolveLight` blends scalars (including shadow opacity) and linear colours and takes the shortest key azimuth path. It adds no time and cuts with the pose for reduced motion.
 
-| Angle | Key az / el / intensity / colour | Hemi | Env | Pool x / y / size / strength |
-|---|---|---|---|---|
-| Three-quarter | −40° / 50° / 3 / `#ffffff` | 0.8 | 1 | 50% / 35% / 75% / 1 |
-| Side, exploded | 117° / 35° / 2.2 / `#eaf1ff` | 0.5 | 1.15 | 60% / 30% / 70% / 0.85 |
-| Top / blueprint | −40° / 70° / 1.5 / `#ffffff` | 0.5 | 0.7 | 50% / 50% / 60% / 0.4 |
-| Hinge detail | −50° / 15° / 3.5 / `#fff6ea` | 0.35 | 0.8 | 55% / 45% / 45% / 0.6 |
-| Front | 0° / 55° / 3 / `#ffffff` | 0.8 | 1 | 50% / 30% / 75% / 1 |
+| Angle | Key az / el / intensity / colour | Hemi | Env | Shadow | Pool x / y / size / strength |
+|---|---|---|---|---|---|
+| Three-quarter | −40° / 50° / 3 / `#ffffff` | 0.8 | 1 | 0.14 | 50% / 35% / 75% / 1 |
+| Side, exploded | 117° / 35° / 2.2 / `#eaf1ff` | 0.5 | 1.15 | 0.12 | 60% / 30% / 70% / 0.85 |
+| Top / blueprint | −40° / 70° / 1.5 / `#ffffff` | 0.5 | 0.7 | 0.10 | 50% / 50% / 60% / 0.4 |
+| Hinge detail | −50° / 25° / 3.5 / `#fff6ea` | 0.35 | 0.8 | 0.05 | 55% / 45% / 45% / 0.8 |
+| Front | 0° / 55° / 3 / `#ffffff` | 0.8 | 1 | 0.14 | 50% / 30% / 75% / 1 |
 
-Environment yaw is `ENV_FOLLOW × pose.theta + radians(light.yaw)`, with `ENV_FOLLOW = 0.35` in `scroll-steps.ts` and every row yaw at 0°. The background pool follows the resolved row; hero strength 1 reproduces the original gradient. Light/environment changes invalidate the blueprint image cache, while only key movement invalidates lighting shadows. Exposure stays at 1.45 and rendering remains on demand.
+Environment yaw is `ENV_FOLLOW × pose.theta + radians(light.yaw)`, with `ENV_FOLLOW = 0.35` in `scroll-steps.ts` and every row yaw at 0°. The background pool follows the resolved row; hero strength 1 reproduces the original gradient.
 
-All specification starting values are retained. Automated coverage adds environment selection/disposal, landed lights, cache/shadow invalidation, linear colour/azimuth resolution and forward/reverse light interpolation; the existing blueprint-fade test is unchanged. Visual review remains outstanding: no browser was available in the implementation session, so defined highlights, lens reflections, moving reflections, pool banding, Ink/Blue appearance and the shop appearance could not be checked. E2E was not run because `../server` is missing.
+V2 uses `PCFShadowMap` with `shadow.radius = 4`: the installed three 0.186 shader multiplies its five Vogel-disk sample offsets by the radius, and the depth texture uses hardware PCF with linear filtering. PCF therefore supports softness directly; VSM is unnecessary. Radius 4 is a new starting choice (the spec gives no numeric radius). The ±23 shadow camera, 2048 map, bias −0.001, normal bias 0.05 and `KEY_DISTANCE` are unchanged. Shadow opacity invalidates the cached studio image without invalidating the shadow map; key or assembly movement still refreshes the map.
+
+`?tone=aces|neutral|agx` selects ACES at 1.45 (default and unknown-value fallback), Neutral at 1.0, or AgX at 1.0. Exposure is set once for the viewer and stays constant through motion and fades. The blueprint composite selects the renderer's matching operator from `tonemapping_pars_fragment`, applies it to the studio image only, and copies exposure each draw; the drawing tokens stay flat. Rendering remains on demand.
+
+The Round 2 opacity values and Hinge corrections match the specification; no other lighting values or comparison exposures were tuned. Automated coverage includes landed/interpolated shadow opacity, opacity-only cache invalidation, unchanged shop defaults, all tone variants/fallbacks, fixed exposure, and matching composite operators. All existing tests, including blueprint-fade render counts, remain unchanged. Round 1 visual findings are recorded in `V2-LIGHTING.md`; Round 2 shadow softness/coverage, Hinge streaks, fade brightness continuity and shop appearance still need visual review. E2E was not run because `../server` is missing.
 
 ## Timing history
 
@@ -84,12 +88,12 @@ No explode-start delay was needed. The fit test passes with the 0→1 explode sp
 - `src/tryon/scroll-budget.ts`, `screen-motion.ts`: per-step phase seconds from projected screen motion.
 - `src/tryon/scroll-timeline.ts`: builds the GSAP timeline from the budget.
 - `src/tryon/scroll-animation.ts`: trapezoid driver, retarget velocity, pause/resume.
-- `src/tryon/scroll-viewer.ts`, `studio.ts`, `studio-environment.ts`, `explode.ts`, `blueprint*.ts`: renderer, procedural studio environments, on-demand frames, exploded fit, blueprint pass.
-- `doc/feature/V2-LIGHTING.md`: V2 lighting specification (sections 1–3).
+- `src/tryon/scroll-viewer.ts`, `studio.ts`, `studio-environment.ts`, `studio-tone.ts`, `explode.ts`, `blueprint*.ts`: renderer, procedural studio environments, on-demand frames, exploded fit, blueprint pass.
+- `doc/feature/V2-LIGHTING.md`: V2 lighting specification (round 1 and round 2).
 
 ## Verification
 
-- `npm run typecheck`, `npm test` (76 tests) and `npm run build` pass after the revision. The only removed test is the obsolete ramp-ease self-check.
+- `npm run typecheck`, `npm test` (82 tests) and `npm run build` pass after the revision. The only removed test is the obsolete ramp-ease self-check.
 - The projection guard passes forward and reverse at both sizes, with the same evenness/spike limits and the 1.237 s first-camera pin. The camera-window offset is now zero in either direction.
 - The rewritten timeline test checks the full camera spans, effect windows, simultaneous turning/exploding at 25/50/75 %, midpoint handoff, effect exclusivity and integer states in both directions after resize rebuilds.
 - The fit test retains parked checks and unchanged every-mesh bbox-corner sampling every 0.01 timeline unit across 0↔1 and 1↔2 at both sizes, including simultaneous camera/explode movement. No NDC limits were relaxed.
