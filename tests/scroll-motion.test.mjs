@@ -88,11 +88,6 @@ const {
   trapezoid,
   CAMERA_SPEED,
   RAMP_S,
-  OVERLAP_S,
-  rampEase,
-  stepDuration,
-  EXPLODE_S,
-  BLUEPRINT_S,
   JUMP_SPEEDUP,
   SCRUB_PX_PER_S,
 } = motion;
@@ -213,7 +208,7 @@ function runGuard(
     }
     tween.pause();
     const phase = budget.steps[i].phases.find((p) => p.kind === "camera");
-    const offset = (reverse ? i + 1 - phase.end : phase.start - i) * budget.steps[i].seconds;
+    const offset = 0; // Camera spans the whole step, in either direction.
     const samples = [];
     let previous = projectionCamera(pose, width, height),
       lastDistance = pose.distance,
@@ -232,7 +227,6 @@ function runGuard(
       ) {
         samples.push({
           elapsed,
-          travelled: stepDuration(start, timeline.time(), budget.seconds),
           speed: visibleScreenSpeed(
             points,
             previous,
@@ -260,10 +254,8 @@ function runGuard(
         )
       : samples.filter(
           (s) =>
-            s.travelled >= offset + RAMP_S + 1 / 60 &&
-            s.travelled <= offset + phase.seconds - RAMP_S &&
-            s.elapsed >= RAMP_S + 1 / 60 &&
-            s.elapsed <= duration - RAMP_S,
+            s.elapsed >= offset + RAMP_S + 1 / 60 &&
+            s.elapsed <= offset + phase.seconds - RAMP_S,
         );
     assert.ok(cruise.length >= 3);
     const speed = median(cruise.map((s) => s.speed));
@@ -444,28 +436,27 @@ test("budget derives seconds/shares, resize rebuilds them, and all scene states 
         assert.ok(Math.abs(p[key] - expected[key]) < 1e-6, `${k} ${key}`);
     });
     for (const step of budget.steps) {
-      const overlaps = step.phases.slice(1).reduce((sum, phase, i) => {
-        const previous = step.phases[i];
-        return sum + ((phase.kind === "camera") !== (previous.kind === "camera")
-          ? Math.min(OVERLAP_S, phase.seconds / 2, previous.seconds / 2) : 0);
-      }, 0);
-      assert.ok(Math.abs(step.seconds -
-        (step.phases.reduce((sum, p) => sum + p.seconds, 0) - overlaps)) < 1e-12);
+      const camera = step.phases.find((phase) => phase.kind === "camera");
+      assert.equal(step.seconds, camera.seconds);
+      const index = Math.floor(camera.start);
+      assert.equal(camera.start, index);
+      assert.equal(camera.end, index + 1);
+      assert.equal(step.seconds, RAMP_S + camera.move.length /
+        (CAMERA_SPEED * motion.SCROLL_ANGLES[index + 1].pace));
+      const effects = step.phases.filter((phase) => phase.kind !== "camera");
+      for (const effect of effects) assert.equal(effect.seconds, step.seconds / effects.length);
       for (const phase of step.phases) {
         assert.ok(
           Math.abs(phase.end - phase.start - phase.seconds / step.seconds) <
             1e-12,
         );
-        if (phase.kind === "explode") assert.equal(phase.seconds, EXPLODE_S);
-        if (phase.kind === "blueprint")
-          assert.equal(phase.seconds, BLUEPRINT_S);
       }
     }
     timeline.kill();
   }
 });
 
-test("ordinary moves keep velocity at phase boundaries, ramp camera edges and scrub proportional to seconds", () => {
+test("ordinary moves keep velocity at effect handoffs and scrub proportional to camera seconds", () => {
   for (const { poses, budget, height, width } of fixtures) {
     const p = { ...poses[0] };
     const timeline = populateScrollTimeline(gsap.timeline({ paused: true }), p, poses, budget);
@@ -487,20 +478,12 @@ test("ordinary moves keep velocity at phase boundaries, ramp camera edges and sc
           for (const boundary of [phase.start, phase.end])
             if (boundary > index && boundary < index + 1)
               assert.ok(Math.abs(plan.sample(elapsedAt(boundary)).velocity) > 0, "no phase stop");
-        const camera = step.phases.find((phase) => phase.kind === "camera");
-        const interiorEnd = reverse ? camera.start : camera.end;
-        if (interiorEnd > index && interiorEnd < index + 1) {
-          const special = step.phases.find((phase) => phase.kind !== "camera" &&
-            phase.start < interiorEnd && phase.end > interiorEnd);
-          assert.ok(special, "special is already in motion at the camera's interior end");
-          const at = elapsedAt(interiorEnd), dt = 0.0001;
-          timeline.time(plan.sample(at - dt).time, false);
-          const before = projectionCamera(p, width, height);
-          const mixBefore = p[special.kind];
+        if (index === 1) {
+          const at = elapsedAt(1.5);
+          assert.ok(Math.abs(plan.sample(at).velocity) > 0, "midpoint handoff has no stop");
           timeline.time(plan.sample(at).time, false);
-          const speed = visibleScreenSpeed(points, before, projectionCamera(p, width, height), width, height, dt);
-          assert.ok(speed < CAMERA_SPEED * 0.01, `camera settled: ${speed}`);
-          assert.ok(Math.abs(p[special.kind] - mixBefore) > 0, "special continues while camera settles");
+          assert.equal(p.explode, 0);
+          assert.equal(p.blueprint, 0);
         }
       }
       for (const phase of step.phases) {
@@ -521,26 +504,29 @@ test("ordinary moves keep velocity at phase boundaries, ramp camera edges and sc
     const elapsed = RAMP_S + (budget.seconds[0] - cruise(RAMP_S).distance) / cruise(RAMP_S).velocity;
     assert.ok(Math.abs(queued.sample(elapsed).time - 1) < 1e-12);
     assert.ok(queued.sample(elapsed).velocity > 0);
+    // At the exact Side→Top midpoint both effects are zero. Halfway through
+    // its blueprint window (1.75), scrubbing has built a partial blueprint.
+    for (const [start, direction] of [[1, 1], [2, -1]]) {
+      const controller = createScrollSteps(poses.length, () => height, false, start, budget.seconds);
+      controller.handle({ type: "touchStart", at: 0, time: start });
+      const scale = SCRUB_PX_PER_S * height * budget.seconds[1];
+      const midpoint = controller.handle({
+        type: "touchMove", at: 200, time: start, deltaY: direction * scale / 2,
+      })[0];
+      assert.ok(Math.abs(midpoint.time - 1.5) < 1e-12);
+      timeline.time(midpoint.time, false);
+      assert.equal(p.explode, 0);
+      assert.equal(p.blueprint, 0);
+      const partial = controller.handle({
+        type: "touchMove", at: 400, time: midpoint.time, deltaY: scale / 4,
+      })[0];
+      assert.ok(Math.abs(partial.time - 1.75) < 1e-12);
+      timeline.time(partial.time, false);
+      assert.equal(p.explode, 0);
+      assert.ok(p.blueprint > 0 && p.blueprint < 1);
+      assert.equal(p.blueprint, 0.5);
+    }
     timeline.kill();
-  }
-});
-
-test("camera ramp ease has exact endpoints, monotonic position and continuous joins", () => {
-  for (const [a, b] of [[0, 0], [0, 0.3], [0.3, 0], [0.2, 0.4], [0.5, 0.5]]) {
-    const ease = rampEase(a, b);
-    assert.equal(ease(0), 0);
-    assert.equal(ease(1), 1);
-    let previous = 0;
-    for (let k = 0; k <= 1000; k++) {
-      const value = ease(k / 1000);
-      assert.ok(value >= previous && value <= 1);
-      previous = value;
-    }
-    const v = 1 / (1 - a / 2 - b / 2);
-    for (const join of [a, 1 - b]) {
-      assert.ok(Math.abs(ease(join) - v * (join - a / 2)) < 1e-12);
-      assert.ok(Math.abs(ease(Math.max(0, join - 1e-8)) - ease(Math.min(1, join + 1e-8))) < 1e-7);
-    }
   }
 });
 

@@ -57,7 +57,6 @@ const {
   createExploder,
   EXPLODE_MM,
   EXPLODE_STAGGER,
-  OVERLAP_S,
   sampleFrameSurface,
   projectionCamera,
   buildMotionBudget,
@@ -1024,7 +1023,7 @@ test("frames with a missing reference assembly make explode a silent no-op", () 
   disposeObject(model);
 });
 
-test("budget timeline overlaps only camera neighbours in both directions and after resize", async () => {
+test("budget timeline runs effects during the whole camera move in both directions and after resize", async () => {
   const { gsap } = await import("gsap");
   const poses = resolveScrollPoses(10, 1, () => ({ x: 6, y: 1, z: 5 }), 15);
   const pose = { ...poses[0] };
@@ -1033,6 +1032,12 @@ test("budget timeline overlaps only camera neighbours in both directions and aft
     Object.keys(expected)
       .filter((k) => k !== "explode" && k !== "blueprint")
       .forEach((k) => assert.ok(Math.abs(pose[k] - expected[k]) < 1e-6, k));
+  const effectWindows = [
+    [["explode", 0, 1, 0, 1]],
+    [["explode", 1, 1.5, 1, 0], ["blueprint", 1.5, 2, 0, 1]],
+    [["blueprint", 2, 3, 1, 0]],
+    [],
+  ];
   for (const [width, height] of [[1808, 1018], [375, 812]]) {
     const rebuilt = resolveScrollPoses(10, width / height, () => ({ x: 6, y: 1, z: 5 }), 15);
     const budget = buildMotionBudget(rebuilt, [], width, height);
@@ -1042,32 +1047,45 @@ test("budget timeline overlaps only camera neighbours in both directions and aft
       ["blueprint", "camera"], ["camera"],
     ]);
     for (const [i, step] of budget.steps.entries()) {
-      assert.equal(step.phases[0].start, i);
-      assert.equal(step.phases.at(-1).end, i + 1);
-      for (const [j, phase] of step.phases.entries()) {
+      const camera = step.phases.find((phase) => phase.kind === "camera");
+      assert.equal(camera.start, i);
+      assert.equal(camera.end, i + 1);
+      assert.equal(camera.seconds, step.seconds);
+      assert.deepEqual(
+        step.phases.filter((phase) => phase.kind !== "camera")
+          .map((phase) => [phase.kind, phase.start, phase.end, phase.from, phase.to]),
+        effectWindows[i],
+      );
+      for (const phase of step.phases)
         assert.ok(Math.abs(phase.end - phase.start - phase.seconds / step.seconds) < 1e-12);
-        if (j) {
-          const previous = step.phases[j - 1];
-          const expected = (phase.kind === "camera") !== (previous.kind === "camera")
-            ? Math.min(OVERLAP_S, phase.seconds / 2, previous.seconds / 2) : 0;
-          assert.ok(Math.abs((previous.end - phase.start) * step.seconds - expected) < 1e-12);
-        }
-        if (phase.kind !== "camera") {
-          timeline.time((phase.start + phase.end) / 2, false);
-          assert.ok(Math.abs(pose[phase.kind] - 0.5) < 1e-6);
-        }
-      }
     }
-    for (const direction of [1, -1])
+    for (const direction of [1, -1]) {
+      const fractions = direction === 1 ? [0.25, 0.5, 0.75] : [0.75, 0.5, 0.25];
+      let previousExplode = direction === 1 ? 0 : 1;
+      for (const time of fractions) {
+        timeline.time(time, false);
+        assert.ok(pose.explode > 0 && pose.explode < 1);
+        assert.ok((pose.explode - previousExplode) * direction > 0);
+        assert.ok(pose.theta > Math.min(rebuilt[0].theta, rebuilt[1].theta) &&
+          pose.theta < Math.max(rebuilt[0].theta, rebuilt[1].theta), "camera still turning");
+        previousExplode = pose.explode;
+      }
       for (let sample = 0; sample <= 400; sample++) {
         const time = direction === 1 ? sample / 100 : (400 - sample) / 100;
         timeline.time(time, false);
         const index = Math.min(3, Math.floor(time));
         const camera = budget.steps[index].phases.find((p) => p.kind === "camera");
-        if (time <= camera.start) equalsOrbit(rebuilt[index]);
-        if (time >= camera.end) equalsOrbit(rebuilt[index + 1]);
+        equalsOrbit(interpolateOrbit(rebuilt[index], rebuilt[index + 1],
+          pathProgress(camera.move, time - index)));
+        const explode = time <= 1 ? time : time <= 1.5 ? 1 - 2 * (time - 1) : 0;
+        const blueprint = time <= 1.5 ? 0 : time <= 2 ? 2 * (time - 1.5) : time <= 3 ? 3 - time : 0;
+        assert.ok(Math.abs(pose.explode - explode) < 1e-6, `explode at ${time}`);
+        assert.ok(Math.abs(pose.blueprint - blueprint) < 1e-6, `blueprint at ${time}`);
         assert.ok(!(pose.explode > 0 && pose.blueprint > 0), `exclusive at ${time}`);
+        if (time >= 1 && time <= 1.5) assert.equal(pose.blueprint, 0);
+        if (time >= 1.5 && time <= 2) assert.equal(pose.explode, 0);
       }
+    }
   }
   timeline.kill();
 });

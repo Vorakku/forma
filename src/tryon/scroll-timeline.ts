@@ -6,22 +6,8 @@ import {
   pathProgress,
   type MotionBudget,
 } from "./scroll-budget";
-import { RAMP_S } from "./scroll-steps";
-
-// Integrated asymmetric trapezoid, normalised to cover the full camera path.
-export function rampEase(a: number, b: number) {
-  const v = 1 / (1 - a / 2 - b / 2);
-  return (p: number) => {
-    if (p <= 0) return 0;
-    if (p >= 1) return 1;
-    if (p < a) return (v * p * p) / (2 * a);
-    if (p > 1 - b) return 1 - (v * (1 - p) * (1 - p)) / (2 * b);
-    return v * (p - a / 2);
-  };
-}
-
-// Scene time is linear in budget seconds. Interior camera edges have their own
-// ramps; integer edges are ramped by the driver for the whole move.
+// Scene time is linear in camera seconds. Effects share the camera move;
+// the driver supplies one speed ramp at each outer edge of the whole move.
 export function populateScrollTimeline(
   timeline: gsap.core.Timeline,
   pose: ScenePose,
@@ -36,18 +22,13 @@ export function populateScrollTimeline(
       if (phase.kind === "camera") {
         const driver = { progress: 0 },
           move = phase.move!;
-        let a = Number.isInteger(phase.start) ? 0 : RAMP_S / phase.seconds;
-        let b = Number.isInteger(phase.end) ? 0 : RAMP_S / phase.seconds;
-        const scale = Math.max(1, a + b);
-        a /= scale;
-        b /= scale;
         timeline.fromTo(
           driver,
           { progress: 0 },
           {
             progress: 1,
             duration,
-            ease: rampEase(a, b),
+            ease: "none",
             immediateRender: false,
             onUpdate: () =>
               Object.assign(

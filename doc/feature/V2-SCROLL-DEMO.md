@@ -26,32 +26,37 @@ Gesture rules and all tuning constants are in `src/tryon/scroll-steps.ts`.
 
 ## Motion model
 
-- **Timeline** (`scroll-timeline.ts`): one paused GSAP timeline where integer time *n* is exactly angle *n*. Explode and blueprint scalar tweens are linear. Camera progress passes through an asymmetric ramp ease before projected path-length mapping. Interior camera edges ramp over `RAMP_S / camera.seconds` (scaled down together if necessary to fit); integer edges rely on the driver's ramp.
-- **Budget** (`scroll-budget.ts`): the phase order remains blueprint out, explode out, camera, explode in, blueprint in. Adjacent camera/special phases overlap by `min(OVERLAP_S, special.seconds / 2, camera.seconds / 2)`. `OVERLAP_S = 0.35 s`; explode and blueprint never overlap.
-  - Camera seconds remain `RAMP_S + projectedLength / (CAMERA_SPEED × pace)`. Projected length measures how far 300 surface points on the frame travel across the screen (`screen-motion.ts`).
-  - Explode and blueprint each take `EXPLODE_S = BLUEPRINT_S = 0.7 s`. A step's actual span is the sum of its phases minus overlaps. Each phase's timeline share is still its seconds divided by the step's actual seconds.
-- **Driver** (`scroll-animation.ts`): one trapezoid over the whole move, ramping only at its outer edges, maps budget seconds linearly into each step's timeline interval. Camera ramps inside the timeline let it settle while explode/blueprint continues, without stopping the whole gesture. A queued extra angle passes the integer angle without stopping.
+- **Timeline** (`scroll-timeline.ts`): one paused GSAP timeline where integer time *n* is exactly angle *n*. The camera spans every whole step `[i, i+1]` with `ease: "none"`; its progress is mapped through projected path length. Effects are linear scalar tweens inside that camera move. There is no interior camera ramp or handoff overlap.
+- **Budget** (`scroll-budget.ts`): a step takes only its camera seconds: `RAMP_S + projectedLength / (CAMERA_SPEED × pace)`. Projected length measures how far 300 surface points on the assembled frame travel across the screen (`screen-motion.ts`). An effect adds no time; its seconds are its share of the step multiplied by the camera seconds.
+  - 0→1: explode 0→1 across the whole move. No delayed start was needed: the unchanged in-motion fit guard passes with `start = 0`.
+  - 1→2: explode closes over `[1, 1.5]`, then blueprint builds over `[1.5, 2]`, reaching full blueprint exactly when the camera lands. At the midpoint both effects are zero; halfway through the blueprint window (time 1.75), blueprint is 0.5.
+  - 2→3: blueprint fades 1→0 across the whole move.
+  - 3→4: camera only.
+  - A single effect fills the step; outgoing/incoming effects split its span in half. Explode and blueprint are never both above zero. Reverse playback mirrors these windows, and integer times remain exactly the angle states.
+- **Driver** (`scroll-animation.ts`): unchanged from round 1. One trapezoid over the whole move ramps only at its outer edges and maps budget seconds linearly into each step's timeline interval. A queued extra angle passes the integer angle without stopping.
   - Home/End uses the same path at `JUMP_SPEEDUP` (2×). Retarget velocity carry, reverse braking and pause/resume remain intact.
   - GSAP schedules frames; elapsed time comes from a monotonic clock so lag smoothing cannot stretch timing.
-- **Explode** (`explode.ts`): the public `pose.explode` scalar remains 0–1. Front and lenses start at 0, temples at `EXPLODE_STAGGER = 0.35`. Every part follows `smoothstep(clamp((amount − start) / (1 − EXPLODE_STAGGER)))`. Lenses lead on departure; temples lead on reassembly. Endpoints restore exact base/full-offset positions.
-- **Scrubbing** still moves timeline time linearly in pixels, weighted by each step's seconds (`SCRUB_PX_PER_S`); the internal camera ramp and part stagger remain visible while scrubbing. Reduced motion still cuts instantly.
+- **Explode** (`explode.ts`): unchanged from round 1. The public `pose.explode` scalar remains 0–1. Front and lenses start at 0, temples at `EXPLODE_STAGGER = 0.35`. Every part follows `smoothstep(clamp((amount − start) / (1 − EXPLODE_STAGGER)))`. Lenses lead on departure; temples lead on reassembly. Endpoints restore exact base/full-offset positions.
+- **Scrubbing** still moves timeline time linearly in pixels, weighted by each step's camera seconds (`SCRUB_PX_PER_S`). Slow wheel/touch drags directly reveal the part stagger and effect windows. Reduced motion still cuts instantly.
+
+Effect duration constants and `OVERLAP_S` have been removed. Effect speed follows the camera move; tune their shared duration with each angle's `pace`.
 
 ## Timing history
 
-| Step | 97e1737 (fixed weights) | 9c9e566 (budget, slow) | 2026-10-08 retune | Overlap (current), desktop / phone |
-|---|---|---|---|---|
-| 0→1 explode | 1.54 s | 3.10 s | 1.94 s desktop / 1.93 s phone | 1.586541 s / 1.581946 s |
-| 1→2 blueprint | 1.87 s | 4.11 s | 2.53 s / 2.54 s | 1.828818 s / 1.840660 s |
-| 2→3 hinge | 1.54 s | 3.97 s | 2.43 s / 2.88 s | 2.081323 s / 2.531361 s |
-| 3→4 front | 1.10 s | 2.64 s | 1.66 s / 2.49 s | 1.657397 s / 2.486621 s |
+| Step | 97e1737 (fixed weights) | 9c9e566 (budget, slow) | 2026-10-08 retune | Round 1 handoff, desktop / phone | Effects during camera (current), desktop / phone |
+|---|---|---|---|---|---|
+| 0→1 explode | 1.54 s | 3.10 s | 1.94 s desktop / 1.93 s phone | 1.586541 s / 1.581946 s | 1.236541 s / 1.231946 s |
+| 1→2 blueprint | 1.87 s | 4.11 s | 2.53 s / 2.54 s | 1.828818 s / 1.840660 s | 1.128818 s / 1.140660 s |
+| 2→3 hinge | 1.54 s | 3.97 s | 2.43 s / 2.88 s | 2.081323 s / 2.531361 s | 1.731323 s / 2.181361 s |
+| 3→4 front | 1.10 s | 2.64 s | 1.66 s / 2.49 s | 1.657397 s / 2.486621 s | 1.657397 s / 2.486621 s |
 
 Desktop is 1808 × 1018 and phone is 375 × 812. Commit 9c9e566 replaced the fixed step weights with the screen-speed budget, which evened out camera speed but made every step 2–3× longer. The 2026-10-08 retune changed:
 - `CAMERA_SPEED` from 0.186463 to 0.326 (1.75× faster);
 - `EXPLODE_S` and `BLUEPRINT_S` from 1.2 s to 0.7 s.
 
-The current overlap column comes from the projection guard’s logged JSON (`tests/scroll-motion.test.mjs`, `after[].stepSeconds`) at these exact viewport sizes, using the existing working-tree retune (`CAMERA_SPEED = 0.326`, `EXPLODE_S = BLUEPRINT_S = 0.7`). Those pre-existing tuning edits are preserved outside the two motion commits. Overlap subtracts 0.35 s on 0→1 and 2→3 and 0.70 s on 1→2; 3→4 is unchanged. No overlap needed shortening for fit. Camera seconds are unchanged: the pinned first camera phase remains 1.237 s (actual desktop value 1.2365411822166799 s).
+The retune and matching 1.237 s camera-duration pin were committed in `1e0d792` before this revision. Round 1 used a 0.35 s camera/effect handoff. The current column comes from the projection guard's logged JSON (`tests/scroll-motion.test.mjs`, `after[].stepSeconds`) at these exact viewport sizes. Every current step now equals its camera seconds; the camera paths, pace values and pinned first camera phase are unchanged (actual desktop first-camera duration: 1.2365411822166799 s).
 
-On a phone, the hinge and front steps are still the longest. Lower `pace` for those rows if they drag.
+No explode-start delay was needed. The fit test passes with the 0→1 explode spanning [0, 1], sampling all mesh bbox corners in both directions at both viewport sizes. On 1→2, each effect half lasts 0.564409 s desktop / 0.570330 s phone. If that feels rushed, lowering the Top view's `pace` lengthens both halves together; no separate effect-duration constant is needed.
 
 ## Files
 
@@ -65,19 +70,21 @@ On a phone, the hinge and front steps are still the longest. Lower `pace` for th
 
 ## Verification
 
-- `npm run typecheck`, `npm test` (70 tests) and `npm run build` pass after overlap.
-- The projection guard passes forward and reverse at both sizes, with the same evenness/spike limits. Its camera-window offset now uses the phase's start/end shares; the reverse gesture starts from its actual landed angle.
-- Viewer tests retain the parked fit check and sample every mesh bbox corner every 0.01 timeline unit across 0↔1 and 1↔2 at both sizes, including simultaneous camera/explode movement. The overlap/order/exclusivity test also runs both directions after the resize rebuild.
-- Driver tests require positive timeline velocity at interior phase boundaries, near-zero camera screen speed at its interior end while a special phase continues, unchanged proportional scrubbing and uninterrupted queued traversal. Ramp ease has endpoint, monotonicity and continuity checks, including either ramp absent. Home/End, retarget and monotonic-clock checks remain.
+- `npm run typecheck`, `npm test` (69 tests) and `npm run build` pass after the revision. The only removed test is the obsolete ramp-ease self-check.
+- The projection guard passes forward and reverse at both sizes, with the same evenness/spike limits and the 1.237 s first-camera pin. The camera-window offset is now zero in either direction.
+- The rewritten timeline test checks the full camera spans, effect windows, simultaneous turning/exploding at 25/50/75 %, midpoint handoff, effect exclusivity and integer states in both directions after resize rebuilds.
+- The fit test retains parked checks and unchanged every-mesh bbox-corner sampling every 0.01 timeline unit across 0↔1 and 1↔2 at both sizes, including simultaneous camera/explode movement. No NDC limits were relaxed.
+- Budget tests require step seconds to equal camera seconds and effect seconds to equal their window shares. Driver tests retain positive velocity at effect handoffs, proportional scrubbing and uninterrupted queued traversal; real scrub commands check both effects zero at 1.5 and a partial blueprint at 1.75. Home/End, retarget and monotonic-clock checks remain unchanged.
 - `npm run test:e2e` was **not run**: `../server` is missing. Playwright needs that server's `.env` and starts it on 8788.
 
 ## Visual review on /v2-demo
 
 Tests verify geometry and timing, not feel. At 1808 × 1018 and 375 × 812, check:
 
-- Step 0→1→2→1→0 with wheel and arrow keys: each step should feel like one gesture, with no full pause at a phase handoff. The camera settles while parts separate/cross-fade, and begins moving as they finish closing/fading out.
-- Lenses/front lead the arms out; arms return first and lenses seat last. Slow wheel/touch scrubbing should show the same stagger without abrupt arm starts.
-- Keep every part on screen during 0↔1 and 1↔2, especially the outer lens and arm tips in the portrait viewport; no clipping, pop or camera snap during the overlap.
-- Blueprint appears only once the parts are assembled, in both directions; verify Ink/Blue cross-fades while the camera settles.
-- Queue one extra angle and retarget forward/back mid-flight: no stop at the intermediate integer angle and no velocity jump on retarget. Release a touch/slow-wheel scrub and check its settle.
-- Home/End should sweep at 2× without internal stops. Reduced motion should cut directly to the requested angle and theme. Resize between desktop/portrait while landed and during a step; watch for clipping or a stale pose.
+- 0→1: parts separate while the camera turns to Side, with lenses/front leading the temples. Camera and explode reach the Side state together, with no effect continuing after landing. On 1→0, temples return first and lenses seat last while the camera returns.
+- 1→2: parts close during the first half of the turn; blueprint builds during the second half and is fully on at landing. At the midpoint the frame is assembled with no blueprint. On 2→1, blueprint fades first, then the frame separates while the camera is still turning.
+- 2→3: blueprint fades throughout the move toward Hinge and is completely off at landing; reverse playback builds it throughout the return to Top. Check Ink/Blue theme transitions too.
+- Watch outer lens and arm tips during 0↔1 and 1↔2, especially early in 0→1 on portrait: every part should stay visible with no clipping, pop or camera snap.
+- Slow wheel/touch scrubbing should reveal the stagger and half-step handoff. Check whether the approximately 0.56–0.57 s effect halves on 1→2 feel rushed. Release a scrub and check its settle.
+- Queue one extra angle and retarget forward/back mid-flight: no stop at the intermediate angle or velocity jump. Home/End should sweep at 2× without internal stops; reduced motion should cut directly to the angle and theme.
+- Resize between desktop/portrait while landed and during a move: watch for clipping or a stale pose.
