@@ -21,7 +21,7 @@ export function createBlueprintRender() {
       studio: { value: studioTarget.texture },
       blueprint: { value: blueprintTarget.texture },
       mixAmount: { value: 0 },
-      toneMappingExposure: { value: 1.45 },
+      toneMappingExposure: { value: 1.0 },
     },
     vertexShader: `varying vec2 vUv;
       void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
@@ -35,7 +35,8 @@ export function createBlueprintRender() {
         vec4 b = texture2D(blueprint, vUv);
         // Render targets carry premultiplied linear colour. Tone-map the studio
         // just as on its direct path, leaving the flat blueprint tokens alone.
-        a.rgb = ACESFilmicToneMapping(a.rgb / max(a.a, 0.00001)) * a.a;
+        // Must match the scroll viewer renderer's tone mapping.
+        a.rgb = NeutralToneMapping(a.rgb / max(a.a, 0.00001)) * a.a;
         vec4 blended = mix(a, b, mixAmount);
         gl_FragColor = vec4(blended.rgb / max(blended.a, 0.00001), blended.a);
         #include <colorspace_fragment>

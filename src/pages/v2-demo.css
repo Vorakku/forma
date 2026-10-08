@@ -1,3 +1,55 @@
+:root[data-theme="night"] {
+  --ink: #ecebe7;
+  --muted: #8f8d87;
+  --line: #2b2a27;
+  --paper: #262624;
+  --soft: #141412;
+  --warm: #c98256;
+  color-scheme: dark;
+}
+:root[data-theme="night"] .site-header {
+  background: var(--paper);
+}
+:root[data-theme="night"]:not([data-mode="blueprint"]) :focus-visible {
+  outline-color: var(--warm);
+}
+:root[data-theme="night"] .v2-demo-copy .muted,
+:root[data-theme="night"] .finale-aside p {
+  color: color-mix(in srgb, var(--muted) 55%, var(--ink));
+}
+:root[data-theme="night"] .finale-cta {
+  color: var(--soft);
+}
+:root[data-theme="day"]::view-transition-group(root),
+:root[data-theme="night"]::view-transition-group(root),
+:root[data-theme="day"]::view-transition-old(root),
+:root[data-theme="day"]::view-transition-new(root),
+:root[data-theme="night"]::view-transition-old(root),
+:root[data-theme="night"]::view-transition-new(root) {
+  animation-duration: 300ms;
+}
+.v2-demo-night-toggle {
+  position: absolute;
+  z-index: 21; /* Above the header navigation row; below the exit paper. */
+  right: 24px;
+  top: 104px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  touch-action: manipulation;
+  opacity: var(--exit-chrome-opacity, 1);
+}
+:root[data-mode="blueprint"] .v2-demo-night-toggle {
+  visibility: hidden;
+}
+
 .v2-demo-stage {
   position: relative;
   height: 100svh;
@@ -74,9 +126,13 @@
 }
 .v2-demo-studio {
   background: radial-gradient(
-    ellipse at 50% 35%,
+    ellipse at var(--pool-x, 50%) var(--pool-y, 35%),
     var(--paper),
-    var(--soft) 75%
+    color-mix(
+      in srgb,
+      var(--soft),
+      var(--ink) calc((1 - var(--pool-strength, 1)) * 10%)
+    ) var(--pool-size, 75%)
   );
   opacity: calc(1 - var(--blueprint-mix, 0));
 }
@@ -139,4 +195,509 @@
 .v2-demo-theme button:focus-visible {
   outline: 1px solid var(--blueprint-line);
   outline-offset: 3px;
+}
+/* Big Shoulders Display 600, latin subset (SIL OFL, Google Fonts). */
+@font-face {
+  font-family: "Big Shoulders Display";
+  src: url("/fonts/big-shoulders-display-600.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+/* Per-angle copy: shown only while landed on its angle, no transition yet. */
+.v2-demo-copy {
+  position: absolute;
+  display: none;
+}
+.v2-demo-stage[data-angle="0"]:not([data-moving]) [data-for-angle="0"],
+.v2-demo-stage[data-angle="1"]:not([data-moving]) [data-for-angle="1"],
+.v2-demo-stage[data-angle="2"]:not([data-moving]) [data-for-angle="2"],
+.v2-demo-stage[data-angle="3"]:not([data-moving]) [data-for-angle="3"],
+.v2-demo-stage[data-angle="4"]:not([data-moving]) [data-for-angle="4"] {
+  display: block;
+}
+/* Above the frame, left edge on the frame's left end (29.3% at landscape fit). */
+[data-for-angle="0"] {
+  left: 29.3%;
+  bottom: 66%;
+  max-width: 520px;
+}
+.v2-demo-copy h1,
+.v2-demo-part h2,
+.bp-head h2,
+.bp-sheet strong {
+  font-family: "Big Shoulders Display", Arial, sans-serif;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+[data-for-angle="0"] p {
+  margin-top: 12px;
+  max-width: 36ch;
+}
+/* Portrait: the frame spans the width, so align to the page gutter. */
+@media (max-aspect-ratio: 1/1) {
+  [data-for-angle="0"] {
+    left: 24px;
+    right: 24px;
+    bottom: 62%;
+  }
+}
+/* Exploded angle: each label beside its part on landscape fit. */
+.v2-demo-part {
+  max-width: 220px;
+  font-size: 0.8rem;
+}
+.v2-demo-part h2 {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+.v2-demo-part span {
+  display: block;
+  margin-top: 6px;
+  letter-spacing: 0.04em;
+}
+.v2-demo-part p {
+  margin-top: 6px;
+  line-height: 1.5;
+}
+[data-part="temples"] {
+  right: 70.5%;
+  top: 50%;
+  text-align: right;
+}
+[data-part="front"] {
+  left: 61%;
+  bottom: 63%;
+}
+[data-part="lenses"] {
+  left: 72.5%;
+  top: 51%;
+}
+/* Portrait: parts are too small to flank, so temples go above, the rest below. */
+@media (max-aspect-ratio: 1/1) {
+  [data-part="temples"] {
+    right: auto;
+    top: auto;
+    left: 24px;
+    bottom: 58%;
+    text-align: left;
+  }
+  [data-part="front"],
+  [data-part="lenses"] {
+    bottom: auto;
+    top: 62%;
+    width: 150px;
+  }
+  [data-part="front"] {
+    left: 24px;
+  }
+  [data-part="lenses"] {
+    left: auto;
+    right: 24px;
+  }
+}
+/* Blueprint angle: drafting sheet in the blueprint tokens. */
+.v2-demo-drawing {
+  inset: 0;
+  container-type: size;
+  color: var(--blueprint-line);
+  pointer-events: none;
+}
+.v2-demo-drawing svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+/* SVG user units scale with the drawing; divide so text stays px-sized. */
+.v2-demo-drawing text {
+  fill: var(--blueprint-line);
+  font-family: Arial, sans-serif;
+}
+.v2-demo-drawing text:not([text-anchor]) {
+  text-anchor: middle;
+}
+.bp-dim,
+.bp-ext {
+  fill: none;
+  stroke: var(--blueprint-line);
+  vector-effect: non-scaling-stroke;
+}
+.bp-ext {
+  stroke: var(--blueprint-hidden);
+}
+.bp-dot {
+  fill: var(--blueprint-line);
+}
+.v2-demo-drawing .bp-num,
+.v2-demo-drawing .bp-head-text {
+  font-family: "Big Shoulders Display", Arial, sans-serif;
+  font-weight: 600;
+  font-size: calc(18px / var(--drawing-scale, 1));
+}
+.v2-demo-drawing .bp-head-text {
+  font-size: calc(15px / var(--drawing-scale, 1));
+  letter-spacing: calc(0.4px / var(--drawing-scale, 1));
+}
+.v2-demo-drawing .bp-cap {
+  fill: var(--blueprint-hidden);
+  font-size: calc(10px / var(--drawing-scale, 1));
+  letter-spacing: calc(1.2px / var(--drawing-scale, 1));
+}
+.v2-demo-drawing .bp-note {
+  fill: var(--blueprint-hidden);
+  font-size: calc(12px / var(--drawing-scale, 1));
+}
+.bp-narrow,
+.bp-list {
+  display: none;
+}
+.bp-head {
+  position: absolute;
+  top: 48px;
+  left: 48px;
+}
+.bp-head h2 {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+.bp-head p,
+.bp-sheet dt,
+.bp-sheet span {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--blueprint-hidden);
+}
+.bp-sheet {
+  position: absolute;
+  left: 32px;
+  bottom: 32px;
+  width: 420px;
+  border: 1px solid var(--blueprint-line);
+}
+.bp-sheet-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--blueprint-line);
+}
+.bp-sheet strong {
+  font-size: 1.25rem;
+}
+.bp-sheet span,
+.bp-sheet dt {
+  margin: 0;
+  font-size: 0.625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.bp-sheet dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 0;
+}
+.bp-sheet dl div {
+  padding: 8px 14px;
+  font-size: 0.75rem;
+}
+.bp-sheet dl div:nth-child(odd) {
+  border-right: 1px solid var(--blueprint-line);
+}
+.bp-sheet dl div:nth-child(-n + 2) {
+  border-bottom: 1px solid var(--blueprint-line);
+}
+.bp-sheet dd {
+  margin: 2px 0 0;
+}
+/* Below 4:3 the leader notes would leave the screen: list them up top,
+   drop the lens/bridge chain and rotate the temple length. */
+@media (max-aspect-ratio: 4/3) {
+  .bp-wide {
+    display: none;
+  }
+  .bp-narrow {
+    display: inline;
+  }
+  .bp-head {
+    left: 32px;
+  }
+  .bp-list {
+    display: grid;
+    gap: 10px;
+    margin: 20px 0 0;
+    padding: 0;
+    list-style: none;
+    font: 600 0.95rem "Big Shoulders Display", Arial, sans-serif;
+    text-transform: uppercase;
+  }
+  .bp-list span {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    margin-right: 10px;
+    border: 1px solid var(--blueprint-line);
+    border-radius: 50%;
+    font: 0.625rem Arial, sans-serif;
+  }
+  /* No room under the frame yet: the empty top-right corner holds it. */
+  .bp-sheet {
+    left: auto;
+    right: 32px;
+    top: 32px;
+    bottom: auto;
+    width: 260px;
+  }
+  .bp-sheet-title {
+    padding: 8px 14px;
+  }
+  .bp-sheet dl div {
+    padding: 6px 14px;
+  }
+}
+/* Phones: too narrow for the corner, so the sheet sits just under the
+   drawing. cqmin matches the drawing's units (1000 units = 100cqmin). */
+@media (max-aspect-ratio: 4/3) and (max-width: 640px) {
+  .bp-sheet {
+    left: 32px;
+    top: calc(50% + 41cqmin);
+    width: auto;
+  }
+}
+/* Short phones (SE): keep only the sheet's title row and drop the intro line. */
+@media (max-aspect-ratio: 4/3) and (max-width: 640px) and (max-height: 700px) {
+  .bp-sheet dl,
+  .bp-head p {
+    display: none;
+  }
+  .bp-sheet-title {
+    border-bottom: 0;
+  }
+}
+/* Hinge close-up: equal steps rising beside the temple. Offsets are from the
+   centre in the camera's fit units (100cqmin = shorter side), measured at
+   1920 × 945. On narrower screens the step shrinks to keep the last note
+   32px from the edge, keeping the rise-to-run ratio (16.1 / 30.65). */
+.v2-demo-steps {
+  inset: 0;
+  container-type: size;
+  pointer-events: none;
+}
+.v2-demo-steps > div {
+  --step: min(30.65cqmin, calc((50cqw - 8.5cqmin - 252px) / 2));
+  position: absolute;
+  width: 220px;
+  left: calc(50cqw + 8.5cqmin + var(--n) * var(--step));
+  top: calc(50cqh + 30.5cqmin - var(--n) * var(--step) * 0.525);
+}
+.v2-demo-steps > div:nth-child(1) {
+  --n: 0;
+}
+.v2-demo-steps > div:nth-child(2) {
+  --n: 1;
+}
+.v2-demo-steps > div:nth-child(3) {
+  --n: 2;
+}
+/* Under 16:10 the steps would overlap: stack them in the light corner. */
+@media (max-aspect-ratio: 8/5) {
+  .v2-demo-steps {
+    inset: auto 32px 32px auto;
+    width: 260px;
+    container-type: normal;
+  }
+  .v2-demo-steps > div {
+    position: static;
+    width: auto;
+    max-width: none;
+  }
+  .v2-demo-steps > div + div {
+    margin-top: 18px;
+  }
+}
+/* Portrait: the close-up fills the screen, so stack the notes over a fade. */
+@media (max-aspect-ratio: 1/1) {
+  .v2-demo-steps {
+    inset: auto 0 0;
+    width: auto;
+    padding: 120px 24px 32px;
+    background: linear-gradient(to top, var(--paper) 65%, transparent);
+  }
+}
+/* Front view finale: a two-line headline split around the frame, which
+   overlaps it from the canvas above. Frame spans ±31cqmin across and
+   −9.4…+11.2cqmin down from the centre (measured at 1920 × 945). */
+.v2-demo-finale {
+  inset: 0;
+  container-type: size;
+  pointer-events: none;
+}
+.v2-demo-finale > * {
+  position: absolute;
+}
+.v2-demo-finale .eyebrow {
+  left: calc(50cqw - 31cqmin);
+  bottom: calc(50cqh + 28.8cqmin + 24px);
+  margin: 0;
+  color: var(--warm);
+}
+.v2-demo-finale h2 {
+  inset: 0;
+  font: 600 26cqmin / 0.78 "Big Shoulders Display", Arial, sans-serif;
+  text-transform: uppercase;
+}
+.v2-demo-finale h2 span {
+  position: absolute;
+  white-space: nowrap;
+}
+.v2-demo-finale h2 span:first-child {
+  left: calc(50cqw - 31cqmin);
+  bottom: calc(50cqh + 8.5cqmin);
+}
+.v2-demo-finale h2 span:last-child {
+  right: calc(50cqw - 31cqmin);
+  top: calc(50cqh + 10cqmin);
+}
+.finale-aside {
+  left: calc(50cqw + 31cqmin + 40px);
+  top: calc(50cqh + 11cqmin);
+}
+.finale-aside em {
+  display: block;
+  font-size: 2rem;
+  line-height: 1;
+  color: var(--warm);
+}
+.finale-aside p {
+  margin-top: 10px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.v2-demo-finale-foot {
+  left: 48px;
+  right: 48px;
+  bottom: 40px;
+}
+.v2-demo-stage[data-angle="4"]:not([data-moving]) .v2-demo-finale-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+.v2-demo-finale-foot p {
+  font-size: 0.75rem;
+  line-height: 1.6;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.finale-cta {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--warm);
+  color: white;
+  font-size: 1.25rem;
+}
+/* Portrait: the aside drops under the second line, right-aligned with it. */
+@media (max-aspect-ratio: 1/1) {
+  .finale-aside {
+    left: auto;
+    right: calc(50cqw - 31cqmin);
+    top: calc(50cqh + 30.3cqmin + 24px);
+    text-align: right;
+  }
+  .v2-demo-finale .eyebrow {
+    left: 24px;
+  }
+  .v2-demo-finale h2 span:first-child {
+    left: 24px;
+  }
+  .v2-demo-finale h2 span:last-child {
+    right: 24px;
+  }
+  .finale-aside {
+    right: 24px;
+  }
+  .v2-demo-finale-foot {
+    left: 24px;
+    right: 24px;
+    bottom: 24px;
+  }
+}
+
+.v2-demo-paper {
+  position: absolute;
+  inset: 0;
+  z-index: 30; /* Above the online floating header too. */
+  background: var(--paper);
+  opacity: var(--exit-paper-opacity, 0);
+  pointer-events: none;
+}
+.v2-demo-stage[data-exiting] {
+  pointer-events: none;
+}
+
+.v2-demo-stage[data-exiting] .v2-demo-paper {
+  pointer-events: auto;
+}
+
+/* The finale is one front-plane layer; the lower spec/CTA remain stage chrome. */
+.v2-demo-stage[data-exit] .v2-demo-finale {
+  display: block;
+  transform: scale(var(--exit-scale));
+  transform-origin: var(--exit-origin-x) var(--exit-origin-y);
+}
+.v2-demo-stage[data-exit] .v2-demo-finale-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  opacity: var(--exit-chrome-opacity);
+}
+
+.v2-demo-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  fill: none;
+}
+/* 1 CSS px at every scale; the dot sizes are px too. */
+.v2-demo-lines * {
+  vector-effect: non-scaling-stroke;
+}
+.v2-demo-stage[data-angle="3"] .lines-hinge-collision {
+  display: none;
+}
+.lines-rule {
+  stroke: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.lines-faint {
+  stroke: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+.lines-mark {
+  stroke: color-mix(in srgb, var(--ink) 46%, transparent);
+}
+.lines-dotted {
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 0 8;
+}
+.lines-dot {
+  stroke: color-mix(in srgb, var(--ink) 74%, transparent);
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+/* Reserve the button's fixed corner when the tablet navigation row is full. */
+@media (min-width: 761px) and (max-width: 1100px) {
+  :root[data-theme] .site-header .main-nav {
+    margin-right: 84px;
+    gap: 18px;
+  }
 }

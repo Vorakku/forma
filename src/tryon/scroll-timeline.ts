@@ -6,9 +6,8 @@ import {
   pathProgress,
   type MotionBudget,
 } from "./scroll-budget";
-
-// Linear scene time: phase seconds determine shares, and camera progress alone
-// is mapped through its projected length. Animation ramps live in the driver.
+// Scene time is linear in camera seconds. Effects share the camera move;
+// the driver supplies one speed ramp at each outer edge of the whole move.
 export function populateScrollTimeline(
   timeline: gsap.core.Timeline,
   pose: ScenePose,
@@ -39,6 +38,7 @@ export function populateScrollTimeline(
                   move.to,
                   pathProgress(move, driver.progress),
                 ),
+                { light: phase.start + driver.progress },
               ),
           },
           phase.start,

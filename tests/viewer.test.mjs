@@ -15,7 +15,7 @@ const output = resolve(".sites-runtime/viewer-tests.mjs");
 await build({
   stdin: {
     contents:
-      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';",
+      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './screen-motion';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';export * from './studio-environment';export * from './v2-theme';",
     resolveDir: resolve("src/tryon"),
   },
   outfile: output,
@@ -33,7 +33,7 @@ await build({
         );
         build.onLoad({ filter: /.*/, namespace: "renderer" }, () => ({
           contents:
-            "export * from 'three';export class WebGLRenderer{constructor(options){return new globalThis.viewerHarness.Renderer(options)}}export class PMREMGenerator{constructor(){globalThis.viewerHarness.generators++}fromScene(){return globalThis.viewerHarness.environment}dispose(){globalThis.viewerHarness.generatorsDisposed++}}",
+            "export * from 'three';export class WebGLRenderer{constructor(options){return new globalThis.viewerHarness.Renderer(options)}}export class PMREMGenerator{constructor(){globalThis.viewerHarness.generators++}fromScene(scene,sigma){globalThis.viewerHarness.captureEnvironment(scene,sigma);if(globalThis.viewerHarness.failEnvironment)throw Error('PMREM failure');return globalThis.viewerHarness.environment}dispose(){globalThis.viewerHarness.generatorsDisposed++}}",
         }));
       },
     },
@@ -54,8 +54,13 @@ const {
   populateScrollTimeline,
   clampPhi,
   SCROLL_ANGLES,
+  ENV_FOLLOW,
+  KEY_DISTANCE,
   createExploder,
   EXPLODE_MM,
+  EXPLODE_STAGGER,
+  sampleFrameSurface,
+  projectionCamera,
   buildMotionBudget,
   interpolateOrbit,
   pathProgress,
@@ -68,6 +73,9 @@ const {
   saveBlueprintTheme,
   BLUEPRINT_THEME_KEY,
   buildEllis,
+  readV2Theme,
+  saveV2Theme,
+  V2_THEME_KEY,
 } = await import(pathToFileURL(output));
 after(() => rm(output, { force: true }));
 const product = (overrides = {}) => ({
@@ -158,6 +166,15 @@ function devices({
     callbacks,
     renderers: [],
     generators: 0,
+    environmentSources: [],
+    captureEnvironment(scene, sigma) {
+      const disposals = new Map();
+      for (const resource of resources(scene)) {
+        disposals.set(resource, 0);
+        resource.addEventListener("dispose", () => disposals.set(resource, disposals.get(resource) + 1));
+      }
+      this.environmentSources.push({ scene, sigma, disposals });
+    },
     generatorsDisposed: 0,
     environment: {
       texture: new THREE.Texture(),
@@ -886,7 +903,7 @@ test("a sixth table angle extends the integer timeline without changing the driv
     { ...SCROLL_ANGLES[0], name: "Extra angle" },
   ];
   const resolved = resolveScrollPoses(10, 1, () => ({ x: 6, y: 1, z: 5 }));
-  const poses = table.map((_, index) => resolved[index] ?? resolved[0]);
+  const poses = table.map((_, index) => ({ ...(resolved[index] ?? resolved[0]), light: index }));
   const pose = { ...poses[0] };
   const timeline = populateScrollTimeline(
     gsap.timeline({ paused: true }),
@@ -932,7 +949,12 @@ test("explode offsets match the reference, do not accumulate and carry nested pa
       node.getWorldPosition(new THREE.Vector3()),
     ];
   });
-  for (const amount of [1, 1, 0.4, 0.8, 0]) {
+  const progress = (name, amount) => {
+    const start = name.startsWith("temple_pivot") ? EXPLODE_STAGGER : 0;
+    const p = Math.max(0, Math.min(1, (amount - start) / (1 - EXPLODE_STAGGER)));
+    return p * p * (3 - 2 * p);
+  };
+  for (const amount of [1, 1, 0.4, 0.8, EXPLODE_STAGGER, 0]) {
     exploder.set(amount);
     for (const [name, x, z] of offsets) {
       const [node, base] = transforms.find(([node]) => node.name === name);
@@ -940,12 +962,17 @@ test("explode offsets match the reference, do not accumulate and carry nested pa
         .clone()
         .add(
           new THREE.Vector3(
-            x * EXPLODE_MM * 0.001 * amount,
+            x * (progress(name, amount) * EXPLODE_MM * 0.001),
             0,
-            z * EXPLODE_MM * 0.001 * amount,
+            z * (progress(name, amount) * EXPLODE_MM * 0.001),
           ),
         );
       assert.ok(node.position.distanceTo(expected) < 1e-15, name);
+      if (amount === 0 || amount === 1) assert.deepEqual(node.position, expected);
+      if (amount === EXPLODE_STAGGER) {
+        if (name.startsWith("temple_pivot")) assert.deepEqual(node.position, base);
+        else assert.ok(node.position.distanceTo(base) > 0, name);
+      }
     }
     for (const [node, local, originalWorld] of children) {
       assert.deepEqual(
@@ -958,9 +985,9 @@ test("explode offsets match the reference, do not accumulate and carry nested pa
         .clone()
         .add(
           new THREE.Vector3(
-            parentOffset[1] * EXPLODE_MM * 0.1 * amount,
+            parentOffset[1] * EXPLODE_MM * 0.1 * progress(parentOffset[0], amount),
             0,
-            parentOffset[2] * EXPLODE_MM * 0.1 * amount,
+            parentOffset[2] * EXPLODE_MM * 0.1 * progress(parentOffset[0], amount),
           ),
         );
       assert.ok(
@@ -970,6 +997,17 @@ test("explode offsets match the reference, do not accumulate and carry nested pa
       );
     }
   }
+  const previous = new Map(offsets.map(([name]) => [name, 0]));
+  for (let sample = 0; sample <= 100; sample++) {
+    exploder.set(sample / 100);
+    for (const [name] of offsets) {
+      const [node, base] = transforms.find(([node]) => node.name === name);
+      const distance = node.position.distanceTo(base);
+      assert.ok(distance >= previous.get(name), `${name} moves monotonically`);
+      previous.set(name, distance);
+    }
+  }
+  exploder.set(0);
   for (const [node, position, quaternion, scale] of transforms) {
     assert.deepEqual(node.position, position);
     assert.deepEqual(node.quaternion.toArray(), quaternion.toArray());
@@ -999,78 +1037,75 @@ test("frames with a missing reference assembly make explode a silent no-op", () 
   disposeObject(model);
 });
 
-test("budget timeline parks the camera whenever exploded or blueprint in both directions and after resize", async () => {
+test("budget timeline runs effects during the whole camera move in both directions and after resize", async () => {
   const { gsap } = await import("gsap");
   const poses = resolveScrollPoses(10, 1, () => ({ x: 6, y: 1, z: 5 }), 15);
-  const pose = { ...poses[0] },
-    budget = buildMotionBudget(poses, [], 1, 1);
-  const timeline = populateScrollTimeline(
-    gsap.timeline({ paused: true }),
-    pose,
-    poses,
-    budget,
-  );
+  const pose = { ...poses[0] };
+  const timeline = gsap.timeline({ paused: true });
   const equalsOrbit = (expected) =>
     Object.keys(expected)
       .filter((k) => k !== "explode" && k !== "blueprint")
       .forEach((k) => assert.ok(Math.abs(pose[k] - expected[k]) < 1e-6, k));
-  for (const direction of [1, -1])
-    for (let index = 0; index <= 400; index++) {
-      const time = direction === 1 ? index / 100 : (400 - index) / 100;
-      timeline.time(time, false);
-      if (pose.explode > 0) equalsOrbit(poses[1]);
-      if (pose.blueprint > 0) equalsOrbit(poses[2]);
-      assert.ok(!(pose.explode > 0 && pose.blueprint > 0));
-    }
-  assert.deepEqual(
-    budget.steps.map((step) => step.phases.map((p) => p.kind)),
-    [
-      ["camera", "explode"],
-      ["explode", "camera", "blueprint"],
-      ["blueprint", "camera"],
-      ["camera"],
-    ],
-  );
-  for (const step of budget.steps)
-    for (const phase of step.phases) {
-      timeline.time((phase.start + phase.end) / 2, false);
-      if (phase.kind === "explode") {
-        assert.equal(pose.explode, 0.5);
-        equalsOrbit(poses[1]);
-      }
-      if (phase.kind === "blueprint") {
-        assert.equal(pose.blueprint, 0.5);
-        equalsOrbit(poses[2]);
-      }
-      if (phase.kind === "camera") {
-        assert.equal(pose.explode, 0);
-        assert.equal(pose.blueprint, 0);
-      }
-      assert.ok(
-        Math.abs(phase.end - phase.start - phase.seconds / step.seconds) <
-          1e-12,
+  const effectWindows = [
+    [["explode", 0, 1, 0, 1]],
+    [["explode", 1, 1.5, 1, 0], ["blueprint", 1.5, 2, 0, 1]],
+    [["blueprint", 2, 3, 1, 0]],
+    [],
+  ];
+  for (const [width, height] of [[1808, 1018], [375, 812]]) {
+    const rebuilt = resolveScrollPoses(10, width / height, () => ({ x: 6, y: 1, z: 5 }), 15);
+    const budget = buildMotionBudget(rebuilt, [], width, height);
+    populateScrollTimeline(timeline, pose, rebuilt, budget);
+    assert.deepEqual(budget.steps.map((step) => step.phases.map((p) => p.kind)), [
+      ["camera", "explode"], ["explode", "camera", "blueprint"],
+      ["blueprint", "camera"], ["camera"],
+    ]);
+    for (const [i, step] of budget.steps.entries()) {
+      const camera = step.phases.find((phase) => phase.kind === "camera");
+      assert.equal(camera.start, i);
+      assert.equal(camera.end, i + 1);
+      assert.equal(camera.seconds, step.seconds);
+      assert.deepEqual(
+        step.phases.filter((phase) => phase.kind !== "camera")
+          .map((phase) => [phase.kind, phase.start, phase.end, phase.from, phase.to]),
+        effectWindows[i],
       );
+      for (const phase of step.phases)
+        assert.ok(Math.abs(phase.end - phase.start - phase.seconds / step.seconds) < 1e-12);
     }
-  const rebuilt = resolveScrollPoses(
-    10,
-    375 / 812,
-    () => ({ x: 6, y: 1, z: 5 }),
-    15,
-  );
-  const newBudget = buildMotionBudget(rebuilt, [], 375, 812);
-  const explodePhase = newBudget.steps[0].phases.find(
-    (p) => p.kind === "explode",
-  );
-  populateScrollTimeline(timeline, pose, rebuilt, newBudget).time(
-    (explodePhase.start + explodePhase.end) / 2,
-    false,
-  );
-  equalsOrbit(rebuilt[1]);
-  assert.equal(pose.explode, 0.5);
+    for (const direction of [1, -1]) {
+      const fractions = direction === 1 ? [0.25, 0.5, 0.75] : [0.75, 0.5, 0.25];
+      let previousExplode = direction === 1 ? 0 : 1;
+      for (const time of fractions) {
+        timeline.time(time, false);
+        assert.ok(pose.explode > 0 && pose.explode < 1);
+        assert.ok((pose.explode - previousExplode) * direction > 0);
+        assert.ok(pose.theta > Math.min(rebuilt[0].theta, rebuilt[1].theta) &&
+          pose.theta < Math.max(rebuilt[0].theta, rebuilt[1].theta), "camera still turning");
+        previousExplode = pose.explode;
+      }
+      for (let sample = 0; sample <= 400; sample++) {
+        const time = direction === 1 ? sample / 100 : (400 - sample) / 100;
+        timeline.time(time, false);
+        const index = Math.min(3, Math.floor(time));
+        const camera = budget.steps[index].phases.find((p) => p.kind === "camera");
+        equalsOrbit(interpolateOrbit(rebuilt[index], rebuilt[index + 1],
+          pathProgress(camera.move, time - index)));
+        const explode = time <= 1 ? time : time <= 1.5 ? 1 - 2 * (time - 1) : 0;
+        const blueprint = time <= 1.5 ? 0 : time <= 2 ? 2 * (time - 1.5) : time <= 3 ? 3 - time : 0;
+        assert.ok(Math.abs(pose.explode - explode) < 1e-6, `explode at ${time}`);
+        assert.ok(Math.abs(pose.blueprint - blueprint) < 1e-6, `blueprint at ${time}`);
+        assert.ok(!(pose.explode > 0 && pose.blueprint > 0), `exclusive at ${time}`);
+        if (time >= 1 && time <= 1.5) assert.equal(pose.blueprint, 0);
+        if (time >= 1.5 && time <= 2) assert.equal(pose.explode, 0);
+      }
+    }
+  }
   timeline.kill();
 });
 
-test("exploded fit contains every part at desktop/mobile sizes; assembled anchors and other fits stay fixed", () => {
+test("exploded fit contains every part at desktop/mobile sizes; assembled anchors and other fits stay fixed", async () => {
+  const { gsap } = await import("gsap");
   const h = devices({ width: 1808, height: 1018 });
   const viewer = createScrollViewer({
     canvas: h.canvas,
@@ -1079,6 +1114,7 @@ test("exploded fit contains every part at desktop/mobile sizes; assembled anchor
   const model = buildDisplayGlasses(product(), 0);
   viewer.setObject(model);
   const hinge = viewer.getAnchor("detail.hinge.right");
+  const points = sampleFrameSurface(model);
   assert.ok(viewer.explodedRadius > viewer.radius);
   for (const [width, height] of [
     [1808, 1018],
@@ -1104,14 +1140,8 @@ test("exploded fit contains every part at desktop/mobile sizes; assembled anchor
     );
     for (const index of [0, 2, 3, 4])
       assert.deepEqual(poses[index], assembledPoses[index]);
-    for (const explode of [0, 0.25, 0.5, 0.75, 1]) {
-      viewer.setPose({ ...poses[1], explode });
-      assert.deepEqual(viewer.getAnchor("detail.hinge.right"), hinge);
-      assert.deepEqual(
-        [poses[3].targetX, poses[3].targetY, poses[3].targetZ],
-        hinge.toArray(),
-      );
-      const camera = h.renderers[0].camera;
+    const assertFits = (camera = h.renderers[0].camera) => {
+      model.updateWorldMatrix(true, true);
       model.traverse((node) => {
         if (!node.isMesh) return;
         node.geometry.computeBoundingBox();
@@ -1130,9 +1160,36 @@ test("exploded fit contains every part at desktop/mobile sizes; assembled anchor
               );
             }
       });
+    };
+    for (const explode of [0, 0.25, 0.5, 0.75, 1]) {
+      viewer.setPose({ ...poses[1], explode });
+      assert.deepEqual(viewer.getAnchor("detail.hinge.right"), hinge);
+      assert.deepEqual(
+        [poses[3].targetX, poses[3].targetY, poses[3].targetZ],
+        hinge.toArray(),
+      );
+      assertFits();
     }
+    const pose = { ...poses[0] };
+    const budget = buildMotionBudget(poses, points, width, height);
+    const timeline = populateScrollTimeline(gsap.timeline({ paused: true }), pose, poses, budget);
+    let movingExplodeSamples = 0;
+    for (const direction of [1, -1])
+      for (let sample = 0; sample <= 200; sample++) {
+        const time = direction === 1 ? sample / 100 : (200 - sample) / 100;
+        timeline.time(time, false);
+        viewer.setPose(pose);
+        const phase = budget.steps[Math.min(1, Math.floor(time))].phases.find((p) => p.kind === "camera");
+        if (time > phase.start && time < phase.end && pose.explode > 0) movingExplodeSamples++;
+        // Blueprint compositing finishes with a screen quad camera; project
+        // model corners through the perspective stage camera represented by pose.
+        assertFits(projectionCamera(pose, width, height));
+      }
+    assert.ok(movingExplodeSamples > 0, "fit checked while camera and explode both move");
+    timeline.kill();
   }
   viewer.dispose();
+  gsap.ticker.sleep();
   assert.equal(h.callbacks.size, 0);
 });
 
@@ -1497,13 +1554,13 @@ test("scroll-only shadow caching refreshes on assembly changes and keeps product
   const renderer = h.renderers[0];
   assert.equal(renderer.shadowMap.autoUpdate, false);
   assert.equal(renderer.shadowMap.needsUpdate, true);
-  viewer.setPose({ ...poses[1], explode: 0 });
+  viewer.setPose({ ...poses[1], light: 0, explode: 0 });
   assert.equal(renderer.shadowMap.needsUpdate, false);
-  viewer.setPose({ ...poses[1], explode: 0.5 });
+  viewer.setPose({ ...poses[1], light: 0, explode: 0.5 });
   assert.equal(renderer.shadowMap.needsUpdate, true);
-  viewer.setPose({ ...poses[1], explode: 0.5 });
+  viewer.setPose({ ...poses[1], light: 0, explode: 0.5 });
   assert.equal(renderer.shadowMap.needsUpdate, false);
-  viewer.setPose({ ...poses[1], explode: 0 });
+  viewer.setPose({ ...poses[1], light: 0, explode: 0 });
   assert.equal(renderer.shadowMap.needsUpdate, true);
   viewer.dispose();
   const productDevices = devices();
@@ -1595,4 +1652,328 @@ test("blueprint lines are disposed once when the shared studio fails or loses co
     assert.equal(h.canvas.count(), 0);
     assert.ok(h.renderers[0].disposed);
   }
+});
+
+test("V2 builds the strip studio and releases every PMREM source resource", () => {
+  const h = devices();
+  const viewer = createScrollViewer({
+    canvas: h.canvas,
+    onError: () => assert.fail("unexpected failure"),
+  });
+  assert.equal(h.environmentSources.length, 1);
+  const { scene, sigma, disposals } = h.environmentSources[0];
+  assert.equal(scene.name, "V2 studio: strip");
+  assert.equal(sigma, 0.03);
+  assert.ok(disposals.size > 0);
+  assert.ok([...disposals.values()].every((count) => count === 1));
+  const cards = scene.children.filter((node) => node.geometry?.type === "PlaneGeometry" && node.name !== "reflection floor");
+  assert.deepEqual(cards.map((card) => card.material.color.r), [6, 8, 8, 0.6]);
+  for (const card of cards) {
+    assert.ok(card.material.isMeshBasicMaterial);
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(card.quaternion);
+    assert.ok(normal.dot(card.position.clone().normalize()) < -0.9999, "panel faces capture origin");
+  }
+  const shell = scene.getObjectByName("room");
+  assert.equal(shell.material.side, THREE.BackSide);
+  assert.equal(shell.material.color.r, 0.03);
+  const floor = scene.getObjectByName("reflection floor");
+  assert.equal(floor.material.color.r, 0.25);
+  viewer.dispose();
+  assert.equal(h.generatorsDisposed, 1);
+  assert.equal(h.environment.disposals, 1);
+  assert.ok([...disposals.values()].every((count) => count === 1), "source resources are not disposed twice");
+  assert.equal(h.callbacks.size, 0);
+});
+
+test("PMREM conversion failure releases the custom scene, generator and renderer", () => {
+  const h = devices();
+  h.failEnvironment = true;
+  assert.throws(() => createScrollViewer({ canvas: h.canvas, onError() {} }), /PMREM failure/);
+  assert.equal(h.environmentSources.length, 1);
+  assert.ok([...h.environmentSources[0].disposals.values()].every((count) => count === 1));
+  assert.equal(h.generatorsDisposed, 1);
+  assert.ok(h.renderers[0].disposed);
+  assert.equal(h.canvas.count(), 0);
+});
+
+test("landed V2 poses apply each row's key, hemisphere, environment and camera-follow yaw; omitted light defaults to hero", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const poses = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius);
+  viewer.setPose(poses[0]);
+  const renderer = h.renderers[0], scene = renderer.scene;
+  const key = scene.children.find((node) => node.isDirectionalLight);
+  const hemi = scene.children.find((node) => node.isHemisphereLight);
+  for (const [index, pose] of poses.entries()) {
+    viewer.setPose({ ...pose, blueprint: 0 });
+    const light = SCROLL_ANGLES[index].light;
+    const expected = new THREE.Vector3().setFromSphericalCoords(
+      KEY_DISTANCE, THREE.MathUtils.degToRad(90 - light.key.elevation), THREE.MathUtils.degToRad(light.key.azimuth),
+    );
+    assert.ok(key.position.equals(expected));
+    assert.ok(Math.abs(key.position.length() - Math.hypot(-15, 28, 18)) < 1e-12);
+    assert.equal(key.intensity, light.key.intensity);
+    assert.ok(key.color.equals(new THREE.Color(light.key.color)));
+    assert.equal(hemi.intensity, light.hemisphere);
+    assert.equal(scene.environmentIntensity, light.environment);
+    assert.equal(scene.environmentRotation.y, ENV_FOLLOW * pose.theta + THREE.MathUtils.degToRad(light.yaw));
+    assert.equal(scene.backgroundRotation.y, 0);
+    assert.equal(renderer.toneMappingExposure, 1.0);
+    assert.deepEqual([key.shadow.camera.left, key.shadow.camera.bottom, key.shadow.camera.right, key.shadow.camera.top], [-23, -23, 23, 23]);
+  }
+  const { light, ...withoutLight } = poses[4];
+  viewer.setPose(withoutLight);
+  assert.equal(key.intensity, SCROLL_ANGLES[0].light.key.intensity);
+  assert.equal(hemi.intensity, SCROLL_ANGLES[0].light.hemisphere);
+  assert.ok(key.color.equals(new THREE.Color(SCROLL_ANGLES[0].light.key.color)));
+  viewer.dispose();
+});
+
+test("light-only changes invalidate blueprint images and moving keys refresh shadows; environment rotation leaves shadows cached", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const pose = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius)[2];
+  viewer.setPose({ ...pose, blueprint: 0 });
+  const renderer = h.renderers[0], scene = renderer.scene;
+  viewer.setPose({ ...pose, blueprint: 0.5 });
+  let renders = renderer.renders;
+  viewer.setPose({ ...pose, blueprint: 0.6 });
+  assert.equal(renderer.renders - renders, 1, "unchanged lighting reuses both cached images");
+  renders = renderer.renders;
+  viewer.setPose({ ...pose, light: 3, blueprint: 0.6 });
+  assert.equal(renderer.renders - renders, 3, "light-only change invalidates studio and drawing cache");
+  assert.equal(renderer.shadowMap.needsUpdate, true);
+  renders = renderer.renders;
+  viewer.setPose({ ...pose, light: 3, theta: pose.theta + 0.4, blueprint: 0.6 });
+  assert.equal(renderer.renders - renders, 3);
+  assert.equal(scene.environmentRotation.y, ENV_FOLLOW * (pose.theta + 0.4));
+  assert.equal(renderer.shadowMap.needsUpdate, false);
+  assert.equal(renderer.toneMappingExposure, 1.0);
+  assert.equal(h.callbacks.size, 0);
+  // At full blueprint the studio pass is skipped. A key move must remain dirty
+  // until the next visible studio image, then subsequent fades can reuse it.
+  viewer.setPose({ ...pose, light: 4, blueprint: 1 });
+  assert.equal(renderer.shadowMap.needsUpdate, true);
+  viewer.setPose({ ...pose, light: 4, blueprint: 0.5 });
+  assert.equal(renderer.shadowMap.needsUpdate, true);
+  viewer.setPose({ ...pose, light: 4, blueprint: 0 });
+  assert.equal(renderer.shadowMap.needsUpdate, false);
+  viewer.dispose();
+});
+
+test("V2 shadows use each landed opacity, wider PCF filtering and the two Round 2 Hinge fixes", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const poses = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius);
+  for (const [index, pose] of poses.entries()) {
+    viewer.setPose({ ...pose, blueprint: 0 });
+    const renderer = h.renderers[0];
+    const key = renderer.scene.children.find((node) => node.isDirectionalLight);
+    assert.equal(renderer.scene.getObjectByName("floor").material.opacity, [0.14, 0.06, 0.10, 0.05, 0.14][index]);
+    assert.equal(renderer.shadowMap.type, THREE.PCFShadowMap);
+    assert.equal(key.shadow.radius, 4);
+    assert.deepEqual(key.shadow.mapSize.toArray(), [2048, 2048]);
+    assert.equal(key.shadow.bias, -0.001);
+    assert.equal(key.shadow.normalBias, 0.05);
+    assert.deepEqual([key.shadow.camera.left, key.shadow.camera.bottom, key.shadow.camera.right, key.shadow.camera.top], [-23, -23, 23, 23]);
+    assert.ok(Math.abs(key.position.length() - KEY_DISTANCE) < 1e-12);
+  }
+  assert.equal(SCROLL_ANGLES[3].light.key.elevation, 25);
+  assert.equal(SCROLL_ANGLES[3].light.pool.strength, 0.8);
+  assert.equal(h.callbacks.size, 0);
+  viewer.dispose();
+});
+
+test("shadow opacity alone invalidates the studio image without recomputing the shadow map", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const pose = { ...resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor)[0], blueprint: 0.5 };
+  viewer.setPose(pose);
+  const renderer = h.renderers[0];
+  // Capture the floor through the direct studio path before testing partial fades.
+  viewer.setPose({ ...pose, blueprint: 0 });
+  const studioFloor = renderer.scene.getObjectByName("floor");
+  const key = renderer.scene.children.find((node) => node.isDirectionalLight);
+  const keyPosition = key.position.clone();
+  viewer.setPose(pose);
+  const before = SCROLL_ANGLES[0].light.shadow;
+  try {
+    let renders = renderer.renders;
+    SCROLL_ANGLES[0].light.shadow = 0.16;
+    viewer.setPose(pose);
+    assert.equal(studioFloor.material.opacity, 0.16);
+    assert.ok(key.position.equals(keyPosition));
+    assert.equal(renderer.renders - renders, 3, "shadow opacity invalidates both cached images");
+    assert.equal(renderer.shadowMap.needsUpdate, false);
+    renders = renderer.renders;
+    viewer.setPose({ ...pose, blueprint: 0.6 });
+    assert.equal(renderer.renders - renders, 1, "unchanged opacity reuses the images");
+    assert.equal(renderer.shadowMap.needsUpdate, false);
+    h.doc.hidden = true;
+    SCROLL_ANGLES[0].light.shadow = 0.18;
+    renders = renderer.renders;
+    viewer.setPose(pose);
+    assert.equal(renderer.renders, renders);
+    h.doc.hidden = false;
+    h.event(h.doc, "visibilitychange");
+    assert.equal(renderer.renders - renders, 3, "hidden opacity change is visible on resuming");
+    assert.equal(studioFloor.material.opacity, 0.18);
+    assert.equal(renderer.shadowMap.needsUpdate, false);
+    assert.equal(h.callbacks.size, 0);
+  } finally {
+    SCROLL_ANGLES[0].light.shadow = before;
+    viewer.dispose();
+  }
+});
+
+test("shop retains its original environment, floor, shadow, tone mapping and exposure", () => {
+  const h = devices();
+  const viewer = h.start();
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  h.flush();
+  const renderer = h.renderers[0];
+  const key = renderer.scene.children.find((node) => node.isDirectionalLight);
+  const source = h.environmentSources[0];
+  assert.equal(source.scene.name, "RoomEnvironment");
+  assert.equal(source.sigma, 0.03);
+  assert.ok([...source.disposals.values()].every((count) => count === 1));
+  const hemi = renderer.scene.children.find((node) => node.isHemisphereLight);
+  assert.deepEqual(key.position.toArray(), [-15, 28, 18]);
+  assert.equal(key.intensity, 3);
+  assert.equal(hemi.intensity, 0.8);
+  assert.equal(renderer.scene.environmentIntensity, 1);
+  assert.equal(renderer.scene.environmentRotation.y, 0);
+  assert.equal(renderer.scene.getObjectByName("floor").material.opacity, 0.035);
+  assert.equal(renderer.shadowMap.type, THREE.PCFShadowMap);
+  assert.equal(key.shadow.radius, 1);
+  assert.equal(renderer.toneMapping, THREE.ACESFilmicToneMapping);
+  assert.equal(renderer.toneMappingExposure, 1.45);
+  viewer.dispose();
+});
+
+function captureToneRenderer(h) {
+  const Original = h.Renderer;
+  h.Renderer = class extends Original {
+    constructor(...args) {
+      super(...args);
+      this.exposureWrites = [];
+      this.compositeDraws = [];
+    }
+    set toneMappingExposure(value) {
+      this.exposureWrites.push(value);
+      this.exposure = value;
+    }
+    get toneMappingExposure() {
+      return this.exposure;
+    }
+    render(scene, camera) {
+      const material = scene.children.find((node) => node.material?.uniforms?.mixAmount)?.material;
+      if (material)
+        this.compositeDraws.push({
+          material,
+          exposure: material.uniforms.toneMappingExposure.value,
+        });
+      super.render(scene, camera);
+    }
+  };
+}
+
+test("V2 uses fixed Neutral tone mapping at exposure 1.0 through motion and blueprint fades", () => {
+  const h = devices();
+  captureToneRenderer(h);
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const poses = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius);
+  const renderer = h.renderers[0];
+  assert.equal(renderer.toneMapping, THREE.NeutralToneMapping);
+  assert.equal(renderer.toneMappingExposure, 1.0);
+  viewer.setPose({ ...poses[2], blueprint: 0 });
+  const initialRenders = renderer.renders;
+  for (const mix of [0.2, 0.8, 1, 0]) {
+    viewer.setPose({ ...poses[2], blueprint: mix });
+    assert.equal(renderer.toneMapping, THREE.NeutralToneMapping);
+    assert.equal(renderer.toneMappingExposure, 1.0);
+  }
+  assert.equal(renderer.renders - initialRenders, 6, "blueprint fades keep the same render count");
+  assert.equal(renderer.compositeDraws.length, 2);
+  for (const draw of renderer.compositeDraws) {
+    assert.equal(draw.exposure, 1.0);
+    assert.equal(draw.material.toneMapped, false, "the composite applies its operator exactly once");
+    assert.match(draw.material.fragmentShader, /a\.rgb = NeutralToneMapping\(a\.rgb \/ max\(a\.a, 0\.00001\)\) \* a\.a/);
+    assert.match(draw.material.fragmentShader, /#include <tonemapping_pars_fragment>/);
+  }
+  for (const pose of poses) viewer.setPose(pose);
+  assert.deepEqual(renderer.exposureWrites, [1.0], "motion and fades never write renderer exposure");
+  assert.equal(h.callbacks.size, 0);
+  assert.equal(renderer.getRenderTarget(), null);
+  viewer.dispose();
+});
+
+test("V2 night switches the shared lenses in place and day restores every original glass property", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => h.errors.push("failed") });
+  const object = buildDisplayGlasses(product(), 0);
+  viewer.setObject(object);
+  const left = object.getObjectByName("lens_L"), right = object.getObjectByName("lens_R");
+  assert.equal(left.material, right.material);
+  const glass = left.material;
+  const keys = ["transmission", "opacity", "transparent", "depthWrite", "clearcoat", "clearcoatRoughness", "thickness", "attenuationDistance", "envMapIntensity", "roughness", "ior"];
+  const snapshot = material => Object.fromEntries(keys.map(key => [key, material[key]]));
+  const day = snapshot(glass), radius = viewer.radius, anchor = viewer.getAnchor("front_frame"), geometry = left.geometry;
+  viewer.setPose(resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor)[0]);
+  const renders = h.renderers[0].renders;
+  const overlay = buildEllis(undefined, { overlay: true });
+  viewer.setTheme("night");
+  assert.deepEqual(snapshot(glass), snapshot(overlay.getObjectByName("lens_L").material));
+  assert.equal(h.renderers[0].renders, renders + 1);
+  assert.equal(left.geometry, geometry);
+  assert.equal(left.material, glass);
+  assert.equal(viewer.radius, radius);
+  assert.deepEqual(viewer.getAnchor("front_frame"), anchor);
+  const version = glass.version;
+  viewer.setTheme("night");
+  assert.equal(glass.version, version);
+  viewer.setTheme("day");
+  assert.deepEqual(snapshot(glass), day);
+  assert.ok(glass.version > version);
+  assert.equal(h.renderers[0].renders, renders + 2);
+  assert.deepEqual(h.errors, []);
+  disposeObject(overlay);
+  viewer.dispose();
+});
+
+test("a stored V2 night theme applies before the first frame and ignores disposal", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => {} });
+  viewer.setTheme("night");
+  const object = buildDisplayGlasses(product(), 0);
+  const material = object.getObjectByName("lens_L").material;
+  viewer.setObject(object);
+  assert.equal(material.transmission, 0);
+  assert.equal(material.opacity, 0.1);
+  assert.equal(material.transparent, true);
+  assert.equal(h.renderers[0].renders, 0);
+  viewer.setPose(resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor)[0]);
+  assert.equal(h.renderers[0].renders, 1);
+  assert.equal(material.transmission, 0);
+  viewer.dispose();
+  assert.doesNotThrow(() => viewer.setTheme("day"));
+});
+
+test("V2 theme defaults to day, validates stored choices and tolerates denied storage", () => {
+  assert.equal(V2_THEME_KEY, "forma.v2.theme");
+  for (const value of [null, "day", "blue", "Night", ""])
+    assert.equal(readV2Theme(() => ({ getItem: key => { assert.equal(key, V2_THEME_KEY); return value; } })), "day");
+  assert.equal(readV2Theme(() => ({ getItem: () => "night" })), "night");
+  assert.equal(readV2Theme(() => { throw Error("denied"); }), "day");
+  assert.equal(readV2Theme(() => ({ getItem: () => { throw Error("denied"); } })), "day");
+  const writes = [];
+  saveV2Theme(() => ({ setItem: (...args) => writes.push(args) }), "night");
+  assert.deepEqual(writes, [[V2_THEME_KEY, "night"]]);
+  assert.doesNotThrow(() => saveV2Theme(() => { throw Error("denied"); }, "night"));
+  assert.doesNotThrow(() => saveV2Theme(() => ({ setItem: () => { throw Error("denied"); } }), "day"));
 });

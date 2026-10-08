@@ -1,0 +1,26 @@
+.exit-reveal-content.is-revealing {
+  animation: exit-focus var(--exit-reveal-s) cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.exit-reveal-paper {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--paper);
+  animation: exit-paper var(--exit-reveal-s) cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes exit-focus {
+  from { filter: blur(var(--exit-blur)); }
+  to { filter: blur(0); }
+}
+@keyframes exit-paper {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .exit-reveal-content.is-revealing { animation: none; }
+  /* The site disables all animations with !important in reduced mode.
+     This short opacity-only fade is the specified reduced exit. */
+  .exit-reveal-paper {
+    animation: exit-paper var(--exit-reduced-s) cubic-bezier(0.2, 0.7, 0.2, 1) both !important;
+  }
+}

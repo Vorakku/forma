@@ -236,6 +236,19 @@ function sweptTemple(side: number) {
   return { geometry, origin: origin.multiplyScalar(0.001) };
 }
 
+// Shared clear-glass recipe for video overlays and the V2 night backdrop.
+export const ELLIS_OVERLAY_GLASS = {
+  transmission: 0,
+  transparent: true,
+  opacity: 0.1,
+  clearcoat: 1,
+  clearcoatRoughness: 0.05,
+  depthWrite: false,
+  thickness: 0,
+  attenuationDistance: Infinity,
+  envMapIntensity: 1,
+} as const;
+
 /** overlay: live camera try-on (no transmission over video, arms flexed open, drawn after the head occluder). */
 export function buildEllis(
   color: THREE.ColorRepresentation = ELLIS_ACETATE,
@@ -258,11 +271,7 @@ export function buildEllis(
         color: 0xffffff,
         metalness: 0,
         roughness: 0.025,
-        transparent: true,
-        opacity: 0.1,
-        clearcoat: 1,
-        clearcoatRoughness: 0.05,
-        depthWrite: false,
+        ...ELLIS_OVERLAY_GLASS,
       })
     : new THREE.MeshPhysicalMaterial({
         color: 0xffffff,

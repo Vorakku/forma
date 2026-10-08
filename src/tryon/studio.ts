@@ -19,15 +19,24 @@ export function createStudio(
   canvas: HTMLCanvasElement,
   onError: () => void,
   beforeDispose?: () => void,
+  environmentBuilder: () => THREE.Scene = () => new RoomEnvironment(),
+  options: {
+    shadowMapType?: THREE.ShadowMapType;
+    shadowRadius?: number;
+    toneMapping?: THREE.ToneMapping;
+    toneMappingExposure?: number;
+  } = {},
 ) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(VIEWER_FOV, 1, 0.1, 1000);
   let renderer: THREE.WebGLRenderer | undefined;
   let environment: THREE.WebGLRenderTarget | undefined;
-  let floor: THREE.Mesh | undefined;
+  let floor: THREE.Mesh<THREE.PlaneGeometry, THREE.ShadowMaterial> | undefined;
   let current: THREE.Group | null = null;
   let radius = 10;
   let stopped = false;
+  let key: THREE.DirectionalLight;
+  let hemisphere: THREE.HemisphereLight;
 
   function dispose() {
     if (stopped) return;
@@ -58,25 +67,27 @@ export function createStudio(
       antialias: true,
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.45;
+    renderer.toneMapping = options.toneMapping ?? THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = options.toneMappingExposure ?? 1.45;
     renderer.setClearColor(0x000000, 0);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.shadowMap.type = options.shadowMapType ?? THREE.PCFShadowMap;
 
-    const room = new RoomEnvironment();
+    const room = environmentBuilder();
     const generator = new THREE.PMREMGenerator(renderer);
     try {
       environment = generator.fromScene(room, 0.03);
       scene.environment = environment.texture;
     } finally {
-      room.dispose();
+      disposeObject(room);
       generator.dispose();
     }
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x9b9fa4, 0.8));
-    const key = new THREE.DirectionalLight(0xffffff, 3);
+    hemisphere = new THREE.HemisphereLight(0xffffff, 0x9b9fa4, 0.8);
+    scene.add(hemisphere);
+    key = new THREE.DirectionalLight(0xffffff, 3);
     key.position.set(-15, 28, 18);
     key.castShadow = true;
+    key.shadow.radius = options.shadowRadius ?? 1;
     key.shadow.mapSize.set(2048, 2048);
     key.shadow.camera.left = key.shadow.camera.bottom = -23;
     key.shadow.camera.right = key.shadow.camera.top = 23;
@@ -100,6 +111,9 @@ export function createStudio(
   return {
     scene,
     camera,
+    key,
+    hemisphere,
+    floor: floor!,
     get radius() {
       return radius;
     },

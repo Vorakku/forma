@@ -1,0 +1,39 @@
+{
+  "viewport": {
+    "width": 1920,
+    "height": 945
+  },
+  "excludedArea": "New theme button, 60px square including antialiasing/focus margin; no mask for blueprint.",
+  "results": [
+    {
+      "angle": 0,
+      "changedChannels": 0,
+      "maxDelta": 0,
+      "channelsOverOne": 0
+    },
+    {
+      "angle": 1,
+      "changedChannels": 5811,
+      "maxDelta": 1,
+      "channelsOverOne": 0
+    },
+    {
+      "angle": 2,
+      "changedChannels": 0,
+      "maxDelta": 0,
+      "channelsOverOne": 0
+    },
+    {
+      "angle": 3,
+      "changedChannels": 0,
+      "maxDelta": 0,
+      "channelsOverOne": 0
+    },
+    {
+      "angle": 4,
+      "changedChannels": 63,
+      "maxDelta": 1,
+      "channelsOverOne": 0
+    }
+  ]
+}

@@ -5,13 +5,7 @@ import {
   type OrbitPose,
   type ScenePose,
 } from "./scroll-poses";
-import {
-  CAMERA_SPEED,
-  PATH_SAMPLES,
-  RAMP_S,
-  EXPLODE_S,
-  BLUEPRINT_S,
-} from "./scroll-steps";
+import { CAMERA_SPEED, PATH_SAMPLES, RAMP_S } from "./scroll-steps";
 import { projectionCamera, visibleScreenSpeed } from "./screen-motion";
 
 export type CameraMove = {
@@ -94,10 +88,11 @@ export function buildMotionBudget(
       move.cumulative.push(move.length);
       previous = current;
     }
+    const speed = CAMERA_SPEED * (paces[index + 1] ?? 1);
+    const seconds = RAMP_S + move.length / speed;
     const phases: MotionPhase[] = [];
     const add = (
       kind: MotionPhase["kind"],
-      seconds: number,
       a: number,
       b: number,
       camera?: CameraMove,
@@ -107,29 +102,26 @@ export function buildMotionBudget(
         seconds,
         from: a,
         to: b,
-        start: 0,
-        end: 0,
+        start: index,
+        end: index + 1,
         move: camera,
       });
     if (from.blueprint !== to.blueprint && from.blueprint)
-      add("blueprint", BLUEPRINT_S, from.blueprint, 0);
+      add("blueprint", from.blueprint, 0);
     if (from.explode !== to.explode && from.explode)
-      add("explode", EXPLODE_S, from.explode, 0);
-    const speed = CAMERA_SPEED * (paces[index + 1] ?? 1);
-    add("camera", RAMP_S + move.length / speed, 0, 1, move);
+      add("explode", from.explode, 0);
+    add("camera", 0, 1, move);
     if (from.explode !== to.explode && to.explode)
-      add("explode", EXPLODE_S, 0, to.explode);
+      add("explode", 0, to.explode);
     if (from.blueprint !== to.blueprint && to.blueprint)
-      add("blueprint", BLUEPRINT_S, 0, to.blueprint);
-    const seconds = phases.reduce((sum, p) => sum + p.seconds, 0);
-    let start = index;
-    phases.forEach((phase, phaseIndex) => {
-      phase.start = start;
-      phase.end =
-        phaseIndex === phases.length - 1
-          ? index + 1
-          : start + phase.seconds / seconds;
-      start = phase.end;
+      add("blueprint", 0, to.blueprint);
+    // Effects ride the camera move. Outgoing effects precede incoming ones,
+    // sharing its span without adding time or mixing explode with blueprint.
+    const effects = phases.filter((phase) => phase.kind !== "camera");
+    effects.forEach((phase, effectIndex) => {
+      phase.start = index + effectIndex / effects.length;
+      phase.end = index + (effectIndex + 1) / effects.length;
+      phase.seconds = seconds / effects.length;
     });
     return { phases, seconds };
   });

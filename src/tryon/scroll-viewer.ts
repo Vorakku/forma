@@ -1,4 +1,7 @@
 import * as THREE from "three";
+import { ELLIS_OVERLAY_GLASS } from "./ellis";
+import type { V2Theme } from "./v2-theme";
+import { applyExitDolly, exitFrontPlane, type ExitDolly } from "./scroll-exit";
 import { sampleFrameSurface } from "./screen-motion";
 import { createStudio } from "./studio";
 import { createExploder } from "./explode";
@@ -6,8 +9,15 @@ import { createBlueprint } from "./blueprint";
 import { createBlueprintRender } from "./blueprint-render";
 import type { BlueprintTokens } from "./blueprint-theme";
 import { VIEWER_MAX_PIXEL_RATIO } from "./studio";
-import { EXPLODE_MM } from "./scroll-steps";
-import { clampPhi, type OrbitPose, type ScenePose } from "./scroll-poses";
+import { buildStudioEnvironment } from "./studio-environment";
+import { EXPLODE_MM, ENV_FOLLOW } from "./scroll-steps";
+import {
+  resolveLight,
+  KEY_DISTANCE,
+  clampPhi,
+  type OrbitPose,
+  type ScenePose,
+} from "./scroll-poses";
 
 export function createScrollViewer({
   canvas,
@@ -32,6 +42,16 @@ export function createScrollViewer({
   let blueprintTokens: BlueprintTokens | undefined;
   let surfacePoints: THREE.Vector3[] = [];
   const anchors = new Map<string, THREE.Vector3>();
+  let exitDolly: ExitDolly | undefined;
+  let frontModel: THREE.Object3D | undefined;
+  let theme: V2Theme = "day";
+  const lenses = new Map<THREE.MeshPhysicalMaterial, { [K in keyof typeof ELLIS_OVERLAY_GLASS]: THREE.MeshPhysicalMaterial[K] }>();
+  const applyLensTheme = () => {
+    for (const [material, day] of lenses) {
+      Object.assign(material, theme === "night" ? ELLIS_OVERLAY_GLASS : day);
+      material.needsUpdate = true;
+    }
+  };
   const studio = createStudio(
     canvas,
     () => {
@@ -39,7 +59,16 @@ export function createScrollViewer({
       onError();
     },
     disposeBlueprint,
+    buildStudioEnvironment,
+    {
+      shadowMapType: THREE.PCFShadowMap,
+      shadowRadius: 4,
+      toneMapping: THREE.NeutralToneMapping,
+      toneMappingExposure: 1.0,
+    },
   );
+  const keyPosition = new THREE.Vector3();
+  const keyColor = new THREE.Color();
   const target = new THREE.Vector3();
   const offset = new THREE.Vector3();
   const spherical = new THREE.Spherical();
@@ -51,6 +80,13 @@ export function createScrollViewer({
     studio.camera.position.copy(target).add(offset.setFromSpherical(spherical));
     studio.camera.up.set(0, 1, 0);
     studio.camera.lookAt(target);
+    if (pose.exit > 0 && exitDolly) {
+      applyExitDolly(studio.camera, exitDolly, pose.exit);
+    } else if (studio.camera.near !== 0.1 || studio.camera.far !== 1000) {
+      studio.camera.near = 0.1;
+      studio.camera.far = 1000;
+      studio.camera.updateProjectionMatrix();
+    }
     studio.render((renderer) => {
       // Directional shadows depend on the model/light, not the viewing camera.
       renderer.shadowMap.autoUpdate = false;
@@ -102,6 +138,7 @@ export function createScrollViewer({
     exploder?.set(0);
     exploder = undefined;
     anchors.clear();
+    lenses.clear();
     surfacePoints = [];
     disposeBlueprint();
     studio.dispose();
@@ -118,6 +155,15 @@ export function createScrollViewer({
   }
 
   return {
+    get frontPlane() {
+      return exitFrontPlane(frontModel!);
+    },
+    modelPoint(point: THREE.Vector3) {
+      return frontModel!.worldToLocal(point.clone());
+    },
+    setExitDolly(value: ExitDolly) {
+      exitDolly = value;
+    },
     get surfacePoints() {
       return surfacePoints;
     },
@@ -142,12 +188,32 @@ export function createScrollViewer({
       blueprint = undefined;
       const installed = studio.setObject(object);
       if (installed === false || installed === null) return installed;
+      lenses.clear();
+      object.traverse((node) => {
+        if (!(node instanceof THREE.Mesh)) return;
+        for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+          if (!(material instanceof THREE.MeshPhysicalMaterial) || material.transmission <= 0 || lenses.has(material)) continue;
+          lenses.set(material, {
+            transmission: material.transmission,
+            transparent: material.transparent,
+            opacity: material.opacity,
+            clearcoat: material.clearcoat,
+            clearcoatRoughness: material.clearcoatRoughness,
+            depthWrite: material.depthWrite,
+            thickness: material.thickness,
+            attenuationDistance: material.attenuationDistance,
+            envMapIntensity: material.envMapIntensity,
+          });
+        }
+      });
+      applyLensTheme();
       exploder = createExploder(object, EXPLODE_MM);
       shadowDirty = true;
       lastExplode = 0;
       renderRevision++;
       anchors.clear();
       object.updateWorldMatrix(true, true);
+      frontModel = object.getObjectByName("ellis.reference") ?? object;
       object.traverse((node) => {
         if (node.name)
           anchors.set(node.name, node.getWorldPosition(new THREE.Vector3()));
@@ -171,6 +237,13 @@ export function createScrollViewer({
       if (blueprintTokens) blueprint.recolor(blueprintTokens);
       return installed;
     },
+    setTheme(next: V2Theme) {
+      if (stopped || next === theme) return;
+      theme = next;
+      applyLensTheme();
+      renderRevision++;
+      render();
+    },
     getAnchor(name: string) {
       return anchors.get(name)?.clone();
     },
@@ -181,14 +254,47 @@ export function createScrollViewer({
       blueprint?.recolor(tokens);
       render();
     },
-    setPose(next: OrbitPose & { explode?: number; blueprint?: number }) {
+    setPose(
+      next: OrbitPose & { explode?: number; blueprint?: number; light?: number; exit?: number },
+    ) {
       if (stopped) return;
+      const light = next.light ?? 0;
+      const resolvedLight = resolveLight(light);
+      keyPosition.setFromSphericalCoords(
+        KEY_DISTANCE,
+        THREE.MathUtils.degToRad(90 - resolvedLight.key.elevation),
+        THREE.MathUtils.degToRad(resolvedLight.key.azimuth),
+      );
+      keyColor.set(resolvedLight.key.color);
+      const environmentYaw =
+        ENV_FOLLOW * next.theta + THREE.MathUtils.degToRad(resolvedLight.yaw);
+      const keyMoved = !studio.key.position.equals(keyPosition);
+      if (keyMoved) shadowDirty = true;
+      if (
+        keyMoved ||
+        !studio.key.color.equals(keyColor) ||
+        studio.key.intensity !== resolvedLight.key.intensity ||
+        studio.hemisphere.intensity !== resolvedLight.hemisphere ||
+        studio.scene.environmentIntensity !== resolvedLight.environment ||
+        studio.scene.environmentRotation.y !== environmentYaw ||
+        studio.floor.material.opacity !== resolvedLight.shadow ||
+        light !== pose?.light
+      )
+        renderRevision++;
+      studio.key.position.copy(keyPosition);
+      studio.key.color.copy(keyColor);
+      studio.key.intensity = resolvedLight.key.intensity;
+      studio.hemisphere.intensity = resolvedLight.hemisphere;
+      studio.scene.environmentIntensity = resolvedLight.environment;
+      studio.scene.environmentRotation.y = environmentYaw;
+      studio.floor.material.opacity = resolvedLight.shadow;
       const explode = next.explode ?? 0;
       if (explode !== lastExplode) shadowDirty = true;
       lastExplode = explode;
       if (
         !pose ||
         explode !== pose.explode ||
+        (next.exit ?? 0) !== pose.exit ||
         (
           ["targetX", "targetY", "targetZ", "theta", "phi", "distance"] as const
         ).some((key) => next[key] !== pose![key])
@@ -199,7 +305,9 @@ export function createScrollViewer({
       pose = {
         ...next,
         explode,
+        light,
         blueprint: blueprintMix,
+        exit: THREE.MathUtils.clamp(next.exit ?? 0, 0, 1),
         phi: clampPhi(next.phi),
       };
       render();

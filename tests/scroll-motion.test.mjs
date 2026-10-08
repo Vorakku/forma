@@ -88,8 +88,6 @@ const {
   trapezoid,
   CAMERA_SPEED,
   RAMP_S,
-  EXPLODE_S,
-  BLUEPRINT_S,
   JUMP_SPEEDUP,
   SCRUB_PX_PER_S,
 } = motion;
@@ -182,7 +180,7 @@ function runGuard(
   for (let i = 0; i < poses.length - 1; i++) {
     const start = reverse ? i + 1 : i;
     timeline.time(start, false);
-    controller.handle({ type: "landed", angle: i, at: i * 10000, time: i });
+    controller.handle({ type: "landed", angle: start, at: i * 10000, time: start });
     const [command] = controller.handle({
       type: "key",
       key: reverse ? "ArrowUp" : "ArrowDown",
@@ -210,12 +208,7 @@ function runGuard(
     }
     tween.pause();
     const phase = budget.steps[i].phases.find((p) => p.kind === "camera");
-    const ordered = reverse
-      ? [...budget.steps[i].phases].reverse()
-      : budget.steps[i].phases;
-    const offset = ordered
-      .slice(0, ordered.indexOf(phase))
-      .reduce((sum, p) => sum + p.seconds, 0);
+    const offset = 0; // Camera spans the whole step, in either direction.
     const samples = [];
     let previous = projectionCamera(pose, width, height),
       lastDistance = pose.distance,
@@ -310,7 +303,7 @@ test("real gesture → step animation → timeline projection guard fails on 97e
     );
   }
   assert.ok(
-    Math.abs(fixtures[0].budget.steps[0].phases[0].seconds - 1.9) < 0.01,
+    Math.abs(fixtures[0].budget.steps[0].phases[0].seconds - 1.237) < 0.01,
   );
 });
 
@@ -443,88 +436,98 @@ test("budget derives seconds/shares, resize rebuilds them, and all scene states 
         assert.ok(Math.abs(p[key] - expected[key]) < 1e-6, `${k} ${key}`);
     });
     for (const step of budget.steps) {
-      assert.equal(
-        step.seconds,
-        step.phases.reduce((sum, p) => sum + p.seconds, 0),
-      );
+      const camera = step.phases.find((phase) => phase.kind === "camera");
+      assert.equal(step.seconds, camera.seconds);
+      const index = Math.floor(camera.start);
+      assert.equal(camera.start, index);
+      assert.equal(camera.end, index + 1);
+      assert.equal(step.seconds, RAMP_S + camera.move.length /
+        (CAMERA_SPEED * motion.SCROLL_ANGLES[index + 1].pace));
+      const effects = step.phases.filter((phase) => phase.kind !== "camera");
+      for (const effect of effects) assert.equal(effect.seconds, step.seconds / effects.length);
       for (const phase of step.phases) {
         assert.ok(
           Math.abs(phase.end - phase.start - phase.seconds / step.seconds) <
             1e-12,
         );
-        if (phase.kind === "explode") assert.equal(phase.seconds, EXPLODE_S);
-        if (phase.kind === "blueprint")
-          assert.equal(phase.seconds, BLUEPRINT_S);
       }
     }
     timeline.kill();
   }
 });
 
-test("each special phase has the configured trapezoid and direct scrubbing is proportional to its seconds", () => {
-  const { poses, budget, height } = fixtures[0],
-    p = { ...poses[0] },
-    timeline = populateScrollTimeline(
-      gsap.timeline({ paused: true }),
-      p,
-      poses,
-      budget,
-    );
-  const animation = controlledAnimation(timeline, budget, 2); // two-angle ordinary traversal retains phase rests
-  animation.tween.pause();
-  let offset = 0;
-  for (const step of budget.steps.slice(0, 2))
-    for (const phase of step.phases) {
-      const profile = trapezoid(phase.seconds, phase.seconds);
-      assert.equal(profile(0).velocity, 0);
-      assert.equal(profile(phase.seconds).velocity, 0);
-      assert.ok(
-        Math.abs(
-          profile(RAMP_S).velocity - profile(phase.seconds - RAMP_S).velocity,
-        ) < 1e-12,
-      );
-      if (phase.kind !== "camera")
-        for (const elapsed of [
-          RAMP_S / 2,
-          RAMP_S,
-          phase.seconds / 2,
-          phase.seconds - RAMP_S / 2,
-        ]) {
-          animation.seek(offset + elapsed);
-          assert.ok(
-            Math.abs(
-              p[phase.kind] -
-                (phase.from +
-                  ((phase.to - phase.from) * profile(elapsed).distance) /
-                    phase.seconds),
-            ) < 1e-6,
-          );
+test("ordinary moves keep velocity at effect handoffs and scrub proportional to camera seconds", () => {
+  for (const { poses, budget, height, width } of fixtures) {
+    const p = { ...poses[0] };
+    const timeline = populateScrollTimeline(gsap.timeline({ paused: true }), p, poses, budget);
+    for (const [index, step] of budget.steps.entries()) {
+      for (const reverse of [false, true]) {
+        const start = reverse ? index + 1 : index;
+        const end = reverse ? index : index + 1;
+        const plan = planStepAnimation(budget, start, end);
+        const elapsedAt = (time) => {
+          let lo = 0, hi = plan.duration;
+          for (let k = 0; k < 60; k++) {
+            const mid = (lo + hi) / 2;
+            if ((plan.sample(mid).time - time) * (reverse ? -1 : 1) < 0) lo = mid;
+            else hi = mid;
+          }
+          return (lo + hi) / 2;
+        };
+        for (const phase of step.phases)
+          for (const boundary of [phase.start, phase.end])
+            if (boundary > index && boundary < index + 1)
+              assert.ok(Math.abs(plan.sample(elapsedAt(boundary)).velocity) > 0, "no phase stop");
+        if (index === 1) {
+          const at = elapsedAt(1.5);
+          assert.ok(Math.abs(plan.sample(at).velocity) > 0, "midpoint handoff has no stop");
+          timeline.time(plan.sample(at).time, false);
+          assert.equal(p.explode, 0);
+          assert.equal(p.blueprint, 0);
         }
-      const secondsForScrub = (phase.end - phase.start) * step.seconds;
-      assert.ok(Math.abs(secondsForScrub - phase.seconds) < 1e-12);
-      const controller = createScrollSteps(
-        poses.length,
-        () => height,
-        false,
-        Math.floor(phase.start),
-        budget.seconds,
-      );
-      controller.handle({ type: "touchStart", at: 0, time: phase.start });
-      const delta = (SCRUB_PX_PER_S * height * phase.seconds) / 2;
-      const command = controller.handle({
-        type: "touchMove",
-        at: 200,
-        time: phase.start,
-        deltaY: delta,
-      })[0];
-      assert.ok(
-        Math.abs(command.time - (phase.start + (phase.end - phase.start) / 2)) <
-          1e-12,
-      );
-      offset += phase.seconds;
+      }
+      for (const phase of step.phases) {
+        const secondsForScrub = (phase.end - phase.start) * step.seconds;
+        assert.ok(Math.abs(secondsForScrub - phase.seconds) < 1e-12);
+        const controller = createScrollSteps(poses.length, () => height, false, index, budget.seconds);
+        controller.handle({ type: "touchStart", at: 0, time: phase.start });
+        const command = controller.handle({
+          type: "touchMove", at: 200, time: phase.start,
+          deltaY: SCRUB_PX_PER_S * height * phase.seconds / 2,
+        })[0];
+        assert.ok(Math.abs(command.time - (phase.start + (phase.end - phase.start) / 2)) < 1e-12);
+      }
     }
-  animation.tween.kill();
-  timeline.kill();
+    // An extra queued angle passes the integer angle without stopping too.
+    const queued = planStepAnimation(budget, 0, 2);
+    const cruise = trapezoid(budget.seconds[0] + budget.seconds[1], queued.duration);
+    const elapsed = RAMP_S + (budget.seconds[0] - cruise(RAMP_S).distance) / cruise(RAMP_S).velocity;
+    assert.ok(Math.abs(queued.sample(elapsed).time - 1) < 1e-12);
+    assert.ok(queued.sample(elapsed).velocity > 0);
+    // At the exact Side→Top midpoint both effects are zero. Halfway through
+    // its blueprint window (1.75), scrubbing has built a partial blueprint.
+    for (const [start, direction] of [[1, 1], [2, -1]]) {
+      const controller = createScrollSteps(poses.length, () => height, false, start, budget.seconds);
+      controller.handle({ type: "touchStart", at: 0, time: start });
+      const scale = SCRUB_PX_PER_S * height * budget.seconds[1];
+      const midpoint = controller.handle({
+        type: "touchMove", at: 200, time: start, deltaY: direction * scale / 2,
+      })[0];
+      assert.ok(Math.abs(midpoint.time - 1.5) < 1e-12);
+      timeline.time(midpoint.time, false);
+      assert.equal(p.explode, 0);
+      assert.equal(p.blueprint, 0);
+      const partial = controller.handle({
+        type: "touchMove", at: 400, time: midpoint.time, deltaY: scale / 4,
+      })[0];
+      assert.ok(Math.abs(partial.time - 1.75) < 1e-12);
+      timeline.time(partial.time, false);
+      assert.equal(p.explode, 0);
+      assert.ok(p.blueprint > 0 && p.blueprint < 1);
+      assert.equal(p.blueprint, 0.5);
+    }
+    timeline.kill();
+  }
 });
 
 test("Home/End play at JUMP_SPEEDUP without internal stops and retarget carries actual velocity", () => {
@@ -625,4 +628,74 @@ test("monotonic animation clock excludes explicit pauses and completes only once
   assert.equal(completions, 1);
   animation.tween.kill();
   timeline.kill();
+});
+
+test("resolveLight preserves exact integer rows and blends scalar, pool and linear colour midpoints without mutation", () => {
+  const { SCROLL_ANGLES, resolveLight } = motion;
+  const before = JSON.stringify(SCROLL_ANGLES);
+  SCROLL_ANGLES.forEach((row, index) => assert.equal(resolveLight(index), row.light));
+  assert.equal(resolveLight(-10), SCROLL_ANGLES[0].light);
+  assert.equal(resolveLight(100), SCROLL_ANGLES.at(-1).light);
+  for (let i = 0; i < SCROLL_ANGLES.length - 1; i++) {
+    const a = SCROLL_ANGLES[i].light, b = SCROLL_ANGLES[i + 1].light;
+    const mid = resolveLight(i + 0.5);
+    for (const scalar of ["hemisphere", "environment", "yaw"])
+      assert.equal(mid[scalar], (a[scalar] + b[scalar]) / 2);
+    for (const scalar of ["elevation", "intensity"])
+      assert.equal(mid.key[scalar], (a.key[scalar] + b.key[scalar]) / 2);
+    for (const scalar of ["x", "y", "size", "strength"])
+      assert.equal(mid.pool[scalar], (a.pool[scalar] + b.pool[scalar]) / 2);
+    const from = new THREE.Color(a.key.color), to = new THREE.Color(b.key.color);
+    for (const channel of ["r", "g", "b"])
+      assert.equal(mid.key.color[channel], (from[channel] + to[channel]) / 2);
+  }
+  assert.equal(JSON.stringify(SCROLL_ANGLES), before);
+});
+
+test("light azimuth wraps the short way while per-angle yaw interpolates linearly", () => {
+  const a = motion.SCROLL_ANGLES[0].light;
+  const rows = [
+    { light: { ...a, key: { ...a.key, azimuth: 170 }, yaw: -10 } },
+    { light: { ...a, key: { ...a.key, azimuth: -170 }, yaw: 30 } },
+  ];
+  assert.equal(motion.resolveLight(0.25, rows).key.azimuth, 175);
+  assert.equal(motion.resolveLight(0.5, rows).key.azimuth, 180);
+  assert.equal(motion.resolveLight(0.75, rows).key.azimuth, 185);
+  assert.equal(motion.resolveLight(1, rows), rows[1].light);
+  assert.equal(motion.resolveLight(0.5, [...rows].reverse()).key.azimuth, -180);
+  assert.equal(motion.resolveLight(0.5, rows).yaw, 10);
+});
+
+test("pose light is linear in every camera window forward and reverse, including resized budgets and instant jumps", () => {
+  const pose = { ...fixtures[0].poses[0] };
+  const timeline = gsap.timeline({ paused: true });
+  for (const { poses, budget } of fixtures) {
+    populateScrollTimeline(timeline, pose, poses, budget);
+    for (const direction of [1, -1]) {
+      for (let sample = 0; sample <= 80; sample++) {
+        const time = direction === 1 ? sample / 20 : (80 - sample) / 20;
+        timeline.time(time, false);
+        assert.ok(Math.abs(pose.light - time) < 1e-6, "linear light at " + time);
+      }
+    }
+    for (const index of [4, 0, 2, 1, 3, 0]) {
+      timeline.time(index, false);
+      assert.equal(pose.light, index, "instant cut to " + index);
+    }
+  }
+  timeline.kill();
+});
+
+test("shadow opacity resolves exactly on landing and blends linearly with the light scalar", () => {
+  const { resolveLight, SCROLL_ANGLES } = motion;
+  const expected = [0.14, 0.06, 0.10, 0.05, 0.14];
+  for (const [index, shadow] of expected.entries()) {
+    assert.equal(SCROLL_ANGLES[index].light.shadow, shadow);
+    assert.equal(resolveLight(index).shadow, shadow);
+    if (index === expected.length - 1) continue;
+    for (const fraction of [0.25, 0.5, 0.75]) {
+      const opacity = shadow + (expected[index + 1] - shadow) * fraction;
+      assert.ok(Math.abs(resolveLight(index + fraction).shadow - opacity) < 1e-12);
+    }
+  }
 });

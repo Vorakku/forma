@@ -18,13 +18,14 @@ const { createScrollSteps, stepDuration, GESTURE_IDLE_MS } = await import(
 );
 after(() => rm(output, { force: true }));
 
-function harness(count = 5, reduced = false, angle = 0) {
+function harness(count = 5, reduced = false, angle = 0, exit = false) {
   const controller = createScrollSteps(
     count,
     () => 1000,
     reduced,
     angle,
-    Array(count - 1).fill(2),
+    [...Array(count - 1).fill(2), ...(exit ? [1.6] : [])],
+    exit,
   );
   let time = angle;
   const send = (type, at, fields = {}) => {
@@ -262,4 +263,161 @@ test("budget seconds weight scrub pixels, update live on resize, and preserve ge
     steps.handle({ type: "wheel", at: 400, time: 0.1, deltaY: 100 }),
     animate(2),
   );
+});
+
+const finale = (reduced = false, angle = 4) => harness(5, reduced, angle, true);
+
+test("fresh forward keys and wheel gestures step Front to position 5", () => {
+  for (const key of ["ArrowDown", "PageDown", " "])
+    assert.deepEqual(finale().send("key", 0, { key }), animate(5));
+  assert.deepEqual(finale().wheel(100, 0), animate(5));
+  const flick = finale();
+  assert.deepEqual(flick.wheel(20, 0), [{ type: "scrubTo", time: 4.05 }]);
+  assert.deepEqual(flick.wheel(20, 30), animate(5));
+});
+
+test("slow wheel and touch scrub the exit; early release returns and late release commits", () => {
+  for (const travel of [100, 300]) {
+    const h = finale();
+    h.send("touchStart", 0);
+    assert.deepEqual(h.send("touchMove", 200, { deltaY: travel }), [
+      { type: "scrubTo", time: 4 + travel / 400 },
+    ]);
+    assert.deepEqual(h.send("touchEnd", 300), animate(travel < 200 ? 4 : 5));
+  }
+  const wheel = finale();
+  for (let n = 0; n < 10; n++) wheel.wheel(4, n * 30);
+  assert.equal(wheel.time, 4.1);
+  assert.deepEqual(wheel.send("idle", 270 + GESTURE_IDLE_MS), animate(4));
+});
+
+test("exit scrub can reverse, cancel and be interrupted before commitment", () => {
+  const h = finale();
+  h.send("touchStart", 0);
+  h.send("touchMove", 200, { deltaY: 300 });
+  h.send("touchMove", 220, { deltaY: -100 });
+  assert.equal(h.time, 4.5);
+  assert.deepEqual(h.send("touchEnd", 300), animate(4));
+  const cancelled = finale();
+  cancelled.send("touchStart", 0);
+  cancelled.send("touchMove", 200, { deltaY: 300 });
+  assert.deepEqual(cancelled.send("touchEnd", 300, { cancelled: true }), animate(4));
+  const flight = finale();
+  flight.send("key", 0, { key: "ArrowDown" });
+  flight.setTime(4.7);
+  flight.send("touchStart", 200);
+  assert.deepEqual(flight.send("touchMove", 400, { deltaY: -200 }), [{ type: "scrubTo", time: 4.2 }]);
+  assert.deepEqual(flight.send("touchEnd", 500), animate(4));
+});
+
+test("End and jumps stop at Front; Home returns from inside the exit", () => {
+  assert.deepEqual(finale().send("key", 0, { key: "End" }), []);
+  assert.deepEqual(finale(false, 0).send("key", 0, { key: "End" }), animate(4, true));
+  for (const key of ["Home", "End"]) {
+    const h = finale();
+    h.send("key", 0, { key: "ArrowDown" });
+    h.setTime(4.5);
+    assert.deepEqual(h.send("key", 100, { key }), animate(key === "Home" ? 0 : 4, true));
+  }
+});
+
+test("forward repeat stops at Front; backward input still steps", () => {
+  for (const key of ["ArrowDown", "PageDown", " "])
+    assert.deepEqual(finale().send("key", 0, { key, repeat: true }), []);
+  const h = finale(false, 3);
+  assert.deepEqual(h.send("key", 0, { key: "ArrowDown", repeat: true }), animate(4));
+  h.setTime(4);
+  h.send("landed", 100, { angle: 4 });
+  assert.deepEqual(h.send("key", 200, { key: "ArrowDown", repeat: true }), []);
+  assert.deepEqual(finale().send("key", 0, { key: "ArrowUp" }), animate(3));
+  assert.deepEqual(finale().wheel(-100, 0), animate(3));
+});
+
+test("in-flight and queued Front cannot queue the exit", () => {
+  const h = finale(false, 2);
+  h.send("key", 0, { key: "ArrowDown" });
+  h.setTime(2.5);
+  h.send("key", 100, { key: "ArrowDown" });
+  assert.deepEqual(h.send("key", 200, { key: "ArrowDown" }), animate(4));
+  h.setTime(4);
+  assert.deepEqual(h.send("key", 300, { key: "ArrowDown" }), animate(4));
+  h.send("landed", 400, { angle: 4 });
+  assert.deepEqual(h.send("key", 500, { key: "ArrowDown" }), animate(5));
+});
+
+test("momentum spanning landing stays at Front until a fresh idle gesture", () => {
+  const h = finale(false, 3);
+  assert.deepEqual(h.wheel(100, 0), animate(4));
+  h.setTime(4);
+  h.send("landed", 100, { angle: 4 });
+  for (let at = 120; at < 1200; at += 16) assert.deepEqual(h.wheel(50, at), []);
+  assert.deepEqual(h.wheel(100, 1200 + GESTURE_IDLE_MS), animate(5));
+});
+
+test("landing guards new wheel and touch input for the full idle window", () => {
+  for (const kind of ["wheel", "touch"]) {
+    const h = finale(false, 3);
+    h.send("key", 0, { key: "End" });
+    h.setTime(4);
+    h.send("landed", 1000, { angle: 4 });
+    if (kind === "wheel") {
+      assert.deepEqual(h.wheel(100, 1179), []);
+      assert.deepEqual(h.wheel(100, 1300), []);
+      assert.deepEqual(h.wheel(100, 1480), animate(5));
+    } else {
+      h.send("touchStart", 1179);
+      assert.deepEqual(h.send("touchMove", 1300, { deltaY: 300 }), []);
+      assert.ok(h.send("touchEnd", 1400).every((c) => c.angle !== 5));
+    }
+  }
+});
+
+test("reduced exit cuts to 5 and uses the same repeat and inertia guard", () => {
+  assert.deepEqual(finale(true).send("key", 0, { key: "ArrowDown" }), [{ type: "cutTo", angle: 5 }]);
+  assert.deepEqual(finale(true).wheel(100, 0), [{ type: "cutTo", angle: 5 }]);
+  assert.deepEqual(finale(true).send("key", 0, { key: "ArrowDown", repeat: true }), []);
+  const h = finale(true, 3);
+  h.send("key", 1000, { key: "ArrowDown" });
+  assert.deepEqual(h.wheel(100, 1050), []);
+  assert.deepEqual(h.wheel(100, 1230), [{ type: "cutTo", angle: 5 }]);
+});
+
+test("landing on 5, rather than a partial scrub, swallows all later input", () => {
+  const h = finale();
+  h.send("key", 0, { key: "ArrowDown" });
+  h.setTime(5);
+  h.send("landed", 2000, { angle: 5 });
+  for (const event of [
+    { type: "wheel", deltaY: 100 }, { type: "wheel", deltaY: -100 },
+    { type: "idle" }, { type: "touchStart" }, { type: "touchMove", deltaY: 100 },
+    { type: "touchEnd" }, { type: "key", key: "Home" },
+    { type: "key", key: "End" }, { type: "key", key: "ArrowDown" },
+    { type: "landed", angle: 0 },
+  ]) assert.deepEqual(h.send(event.type, 3000, event), []);
+  assert.deepEqual(h.controller.setReduced(true, 5), []);
+});
+
+test("blocked or modified Front input cannot enter the exit", () => {
+  const h = finale();
+  for (const fields of [{ ctrlKey: true }, { deltaX: 101 }, { blocked: true }])
+    assert.deepEqual(h.wheel(100, 0, fields), []);
+  for (const fields of [
+    { key: "ArrowDown", editable: true },
+    { key: "ArrowDown", blocked: true },
+    { key: " ", interactive: true },
+  ]) assert.deepEqual(h.send("key", 0, fields), []);
+  assert.deepEqual(h.send("key", 0, { key: "ArrowDown" }), animate(5));
+});
+
+
+test("quick forward touch flick plays the exit but cannot bypass landing idle", () => {
+  const h = finale();
+  h.send("touchStart", 0);
+  assert.deepEqual(h.send("touchMove", 40, { deltaY: 50 }), [{ type: "scrubTo", time: 4.125 }]);
+  assert.deepEqual(h.send("touchEnd", 80), animate(5));
+  const guarded = finale();
+  guarded.send("landed", 1000, { angle: 4 });
+  guarded.send("touchStart", 1010);
+  assert.deepEqual(guarded.send("touchMove", 1050, { deltaY: 50 }), []);
+  assert.ok(guarded.send("touchEnd", 1090).every((command) => command.angle !== 5));
 });
