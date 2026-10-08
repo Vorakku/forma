@@ -19,6 +19,7 @@ export function createStudio(
   canvas: HTMLCanvasElement,
   onError: () => void,
   beforeDispose?: () => void,
+  environmentBuilder: () => THREE.Scene = () => new RoomEnvironment(),
 ) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(VIEWER_FOV, 1, 0.1, 1000);
@@ -28,6 +29,8 @@ export function createStudio(
   let current: THREE.Group | null = null;
   let radius = 10;
   let stopped = false;
+  let key: THREE.DirectionalLight;
+  let hemisphere: THREE.HemisphereLight;
 
   function dispose() {
     if (stopped) return;
@@ -64,17 +67,18 @@ export function createStudio(
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
 
-    const room = new RoomEnvironment();
+    const room = environmentBuilder();
     const generator = new THREE.PMREMGenerator(renderer);
     try {
       environment = generator.fromScene(room, 0.03);
       scene.environment = environment.texture;
     } finally {
-      room.dispose();
+      disposeObject(room);
       generator.dispose();
     }
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x9b9fa4, 0.8));
-    const key = new THREE.DirectionalLight(0xffffff, 3);
+    hemisphere = new THREE.HemisphereLight(0xffffff, 0x9b9fa4, 0.8);
+    scene.add(hemisphere);
+    key = new THREE.DirectionalLight(0xffffff, 3);
     key.position.set(-15, 28, 18);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -100,6 +104,8 @@ export function createStudio(
   return {
     scene,
     camera,
+    key,
+    hemisphere,
     get radius() {
       return radius;
     },
