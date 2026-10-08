@@ -11,6 +11,7 @@ import {
   RAMP_S,
   EXPLODE_S,
   BLUEPRINT_S,
+  OVERLAP_S,
 } from "./scroll-steps";
 import { projectionCamera, visibleScreenSpeed } from "./screen-motion";
 
@@ -121,15 +122,26 @@ export function buildMotionBudget(
       add("explode", EXPLODE_S, 0, to.explode);
     if (from.blueprint !== to.blueprint && to.blueprint)
       add("blueprint", BLUEPRINT_S, 0, to.blueprint);
-    const seconds = phases.reduce((sum, p) => sum + p.seconds, 0);
-    let start = index;
+    // Only camera/special neighbours share time. The half-phase caps also
+    // keep leading explode and trailing blueprint disjoint on short moves.
+    const overlaps = phases.slice(1).map((phase, i) => {
+      const previous = phases[i];
+      return (phase.kind === "camera") !== (previous.kind === "camera")
+        ? Math.min(OVERLAP_S, phase.seconds / 2, previous.seconds / 2)
+        : 0;
+    });
+    const seconds =
+      phases.reduce((sum, p) => sum + p.seconds, 0) -
+      overlaps.reduce((sum, overlap) => sum + overlap, 0);
+    let elapsed = 0;
     phases.forEach((phase, phaseIndex) => {
-      phase.start = start;
+      elapsed -= overlaps[phaseIndex - 1] ?? 0;
+      phase.start = index + elapsed / seconds;
+      elapsed += phase.seconds;
       phase.end =
         phaseIndex === phases.length - 1
           ? index + 1
-          : start + phase.seconds / seconds;
-      start = phase.end;
+          : index + elapsed / seconds;
     });
     return { phases, seconds };
   });

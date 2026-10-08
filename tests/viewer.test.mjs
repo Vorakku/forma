@@ -15,7 +15,7 @@ const output = resolve(".sites-runtime/viewer-tests.mjs");
 await build({
   stdin: {
     contents:
-      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';",
+      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './screen-motion';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';",
     resolveDir: resolve("src/tryon"),
   },
   outfile: output,
@@ -57,6 +57,9 @@ const {
   createExploder,
   EXPLODE_MM,
   EXPLODE_STAGGER,
+  OVERLAP_S,
+  sampleFrameSurface,
+  projectionCamera,
   buildMotionBudget,
   interpolateOrbit,
   pathProgress,
@@ -1021,78 +1024,56 @@ test("frames with a missing reference assembly make explode a silent no-op", () 
   disposeObject(model);
 });
 
-test("budget timeline parks the camera whenever exploded or blueprint in both directions and after resize", async () => {
+test("budget timeline overlaps only camera neighbours in both directions and after resize", async () => {
   const { gsap } = await import("gsap");
   const poses = resolveScrollPoses(10, 1, () => ({ x: 6, y: 1, z: 5 }), 15);
-  const pose = { ...poses[0] },
-    budget = buildMotionBudget(poses, [], 1, 1);
-  const timeline = populateScrollTimeline(
-    gsap.timeline({ paused: true }),
-    pose,
-    poses,
-    budget,
-  );
+  const pose = { ...poses[0] };
+  const timeline = gsap.timeline({ paused: true });
   const equalsOrbit = (expected) =>
     Object.keys(expected)
       .filter((k) => k !== "explode" && k !== "blueprint")
       .forEach((k) => assert.ok(Math.abs(pose[k] - expected[k]) < 1e-6, k));
-  for (const direction of [1, -1])
-    for (let index = 0; index <= 400; index++) {
-      const time = direction === 1 ? index / 100 : (400 - index) / 100;
-      timeline.time(time, false);
-      if (pose.explode > 0) equalsOrbit(poses[1]);
-      if (pose.blueprint > 0) equalsOrbit(poses[2]);
-      assert.ok(!(pose.explode > 0 && pose.blueprint > 0));
+  for (const [width, height] of [[1808, 1018], [375, 812]]) {
+    const rebuilt = resolveScrollPoses(10, width / height, () => ({ x: 6, y: 1, z: 5 }), 15);
+    const budget = buildMotionBudget(rebuilt, [], width, height);
+    populateScrollTimeline(timeline, pose, rebuilt, budget);
+    assert.deepEqual(budget.steps.map((step) => step.phases.map((p) => p.kind)), [
+      ["camera", "explode"], ["explode", "camera", "blueprint"],
+      ["blueprint", "camera"], ["camera"],
+    ]);
+    for (const [i, step] of budget.steps.entries()) {
+      assert.equal(step.phases[0].start, i);
+      assert.equal(step.phases.at(-1).end, i + 1);
+      for (const [j, phase] of step.phases.entries()) {
+        assert.ok(Math.abs(phase.end - phase.start - phase.seconds / step.seconds) < 1e-12);
+        if (j) {
+          const previous = step.phases[j - 1];
+          const expected = (phase.kind === "camera") !== (previous.kind === "camera")
+            ? Math.min(OVERLAP_S, phase.seconds / 2, previous.seconds / 2) : 0;
+          assert.ok(Math.abs((previous.end - phase.start) * step.seconds - expected) < 1e-12);
+        }
+        if (phase.kind !== "camera") {
+          timeline.time((phase.start + phase.end) / 2, false);
+          assert.ok(Math.abs(pose[phase.kind] - 0.5) < 1e-6);
+        }
+      }
     }
-  assert.deepEqual(
-    budget.steps.map((step) => step.phases.map((p) => p.kind)),
-    [
-      ["camera", "explode"],
-      ["explode", "camera", "blueprint"],
-      ["blueprint", "camera"],
-      ["camera"],
-    ],
-  );
-  for (const step of budget.steps)
-    for (const phase of step.phases) {
-      timeline.time((phase.start + phase.end) / 2, false);
-      if (phase.kind === "explode") {
-        assert.equal(pose.explode, 0.5);
-        equalsOrbit(poses[1]);
+    for (const direction of [1, -1])
+      for (let sample = 0; sample <= 400; sample++) {
+        const time = direction === 1 ? sample / 100 : (400 - sample) / 100;
+        timeline.time(time, false);
+        const index = Math.min(3, Math.floor(time));
+        const camera = budget.steps[index].phases.find((p) => p.kind === "camera");
+        if (time <= camera.start) equalsOrbit(rebuilt[index]);
+        if (time >= camera.end) equalsOrbit(rebuilt[index + 1]);
+        assert.ok(!(pose.explode > 0 && pose.blueprint > 0), `exclusive at ${time}`);
       }
-      if (phase.kind === "blueprint") {
-        assert.equal(pose.blueprint, 0.5);
-        equalsOrbit(poses[2]);
-      }
-      if (phase.kind === "camera") {
-        assert.equal(pose.explode, 0);
-        assert.equal(pose.blueprint, 0);
-      }
-      assert.ok(
-        Math.abs(phase.end - phase.start - phase.seconds / step.seconds) <
-          1e-12,
-      );
-    }
-  const rebuilt = resolveScrollPoses(
-    10,
-    375 / 812,
-    () => ({ x: 6, y: 1, z: 5 }),
-    15,
-  );
-  const newBudget = buildMotionBudget(rebuilt, [], 375, 812);
-  const explodePhase = newBudget.steps[0].phases.find(
-    (p) => p.kind === "explode",
-  );
-  populateScrollTimeline(timeline, pose, rebuilt, newBudget).time(
-    (explodePhase.start + explodePhase.end) / 2,
-    false,
-  );
-  equalsOrbit(rebuilt[1]);
-  assert.equal(pose.explode, 0.5);
+  }
   timeline.kill();
 });
 
-test("exploded fit contains every part at desktop/mobile sizes; assembled anchors and other fits stay fixed", () => {
+test("exploded fit contains every part at desktop/mobile sizes; assembled anchors and other fits stay fixed", async () => {
+  const { gsap } = await import("gsap");
   const h = devices({ width: 1808, height: 1018 });
   const viewer = createScrollViewer({
     canvas: h.canvas,
@@ -1101,6 +1082,7 @@ test("exploded fit contains every part at desktop/mobile sizes; assembled anchor
   const model = buildDisplayGlasses(product(), 0);
   viewer.setObject(model);
   const hinge = viewer.getAnchor("detail.hinge.right");
+  const points = sampleFrameSurface(model);
   assert.ok(viewer.explodedRadius > viewer.radius);
   for (const [width, height] of [
     [1808, 1018],
@@ -1126,14 +1108,8 @@ test("exploded fit contains every part at desktop/mobile sizes; assembled anchor
     );
     for (const index of [0, 2, 3, 4])
       assert.deepEqual(poses[index], assembledPoses[index]);
-    for (const explode of [0, 0.25, 0.5, 0.75, 1]) {
-      viewer.setPose({ ...poses[1], explode });
-      assert.deepEqual(viewer.getAnchor("detail.hinge.right"), hinge);
-      assert.deepEqual(
-        [poses[3].targetX, poses[3].targetY, poses[3].targetZ],
-        hinge.toArray(),
-      );
-      const camera = h.renderers[0].camera;
+    const assertFits = (camera = h.renderers[0].camera) => {
+      model.updateWorldMatrix(true, true);
       model.traverse((node) => {
         if (!node.isMesh) return;
         node.geometry.computeBoundingBox();
@@ -1152,9 +1128,36 @@ test("exploded fit contains every part at desktop/mobile sizes; assembled anchor
               );
             }
       });
+    };
+    for (const explode of [0, 0.25, 0.5, 0.75, 1]) {
+      viewer.setPose({ ...poses[1], explode });
+      assert.deepEqual(viewer.getAnchor("detail.hinge.right"), hinge);
+      assert.deepEqual(
+        [poses[3].targetX, poses[3].targetY, poses[3].targetZ],
+        hinge.toArray(),
+      );
+      assertFits();
     }
+    const pose = { ...poses[0] };
+    const budget = buildMotionBudget(poses, points, width, height);
+    const timeline = populateScrollTimeline(gsap.timeline({ paused: true }), pose, poses, budget);
+    let movingExplodeSamples = 0;
+    for (const direction of [1, -1])
+      for (let sample = 0; sample <= 200; sample++) {
+        const time = direction === 1 ? sample / 100 : (200 - sample) / 100;
+        timeline.time(time, false);
+        viewer.setPose(pose);
+        const phase = budget.steps[Math.min(1, Math.floor(time))].phases.find((p) => p.kind === "camera");
+        if (time > phase.start && time < phase.end && pose.explode > 0) movingExplodeSamples++;
+        // Blueprint compositing finishes with a screen quad camera; project
+        // model corners through the perspective stage camera represented by pose.
+        assertFits(projectionCamera(pose, width, height));
+      }
+    assert.ok(movingExplodeSamples > 0, "fit checked while camera and explode both move");
+    timeline.kill();
   }
   viewer.dispose();
+  gsap.ticker.sleep();
   assert.equal(h.callbacks.size, 0);
 });
 

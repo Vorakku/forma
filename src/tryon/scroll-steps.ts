@@ -10,6 +10,7 @@ export const PATH_SAMPLES = 256;
 export const SURFACE_POINTS = 300;
 export const VISIBLE_MARGIN = 0.1;
 export const RAMP_S = 0.35;
+export const OVERLAP_S = 0.35;
 export const EXPLODE_S = 1.2;
 export const BLUEPRINT_S = 1.2;
 export const SCRUB_PX_PER_S = 0.25; // × viewport height

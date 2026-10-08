@@ -88,6 +88,9 @@ const {
   trapezoid,
   CAMERA_SPEED,
   RAMP_S,
+  OVERLAP_S,
+  rampEase,
+  stepDuration,
   EXPLODE_S,
   BLUEPRINT_S,
   JUMP_SPEEDUP,
@@ -182,7 +185,7 @@ function runGuard(
   for (let i = 0; i < poses.length - 1; i++) {
     const start = reverse ? i + 1 : i;
     timeline.time(start, false);
-    controller.handle({ type: "landed", angle: i, at: i * 10000, time: i });
+    controller.handle({ type: "landed", angle: start, at: i * 10000, time: start });
     const [command] = controller.handle({
       type: "key",
       key: reverse ? "ArrowUp" : "ArrowDown",
@@ -210,12 +213,7 @@ function runGuard(
     }
     tween.pause();
     const phase = budget.steps[i].phases.find((p) => p.kind === "camera");
-    const ordered = reverse
-      ? [...budget.steps[i].phases].reverse()
-      : budget.steps[i].phases;
-    const offset = ordered
-      .slice(0, ordered.indexOf(phase))
-      .reduce((sum, p) => sum + p.seconds, 0);
+    const offset = (reverse ? i + 1 - phase.end : phase.start - i) * budget.steps[i].seconds;
     const samples = [];
     let previous = projectionCamera(pose, width, height),
       lastDistance = pose.distance,
@@ -234,6 +232,7 @@ function runGuard(
       ) {
         samples.push({
           elapsed,
+          travelled: stepDuration(start, timeline.time(), budget.seconds),
           speed: visibleScreenSpeed(
             points,
             previous,
@@ -261,8 +260,10 @@ function runGuard(
         )
       : samples.filter(
           (s) =>
-            s.elapsed >= offset + RAMP_S + 1 / 60 &&
-            s.elapsed <= offset + phase.seconds - RAMP_S,
+            s.travelled >= offset + RAMP_S + 1 / 60 &&
+            s.travelled <= offset + phase.seconds - RAMP_S &&
+            s.elapsed >= RAMP_S + 1 / 60 &&
+            s.elapsed <= duration - RAMP_S,
         );
     assert.ok(cruise.length >= 3);
     const speed = median(cruise.map((s) => s.speed));
@@ -443,10 +444,13 @@ test("budget derives seconds/shares, resize rebuilds them, and all scene states 
         assert.ok(Math.abs(p[key] - expected[key]) < 1e-6, `${k} ${key}`);
     });
     for (const step of budget.steps) {
-      assert.equal(
-        step.seconds,
-        step.phases.reduce((sum, p) => sum + p.seconds, 0),
-      );
+      const overlaps = step.phases.slice(1).reduce((sum, phase, i) => {
+        const previous = step.phases[i];
+        return sum + ((phase.kind === "camera") !== (previous.kind === "camera")
+          ? Math.min(OVERLAP_S, phase.seconds / 2, previous.seconds / 2) : 0);
+      }, 0);
+      assert.ok(Math.abs(step.seconds -
+        (step.phases.reduce((sum, p) => sum + p.seconds, 0) - overlaps)) < 1e-12);
       for (const phase of step.phases) {
         assert.ok(
           Math.abs(phase.end - phase.start - phase.seconds / step.seconds) <
@@ -461,70 +465,83 @@ test("budget derives seconds/shares, resize rebuilds them, and all scene states 
   }
 });
 
-test("each special phase has the configured trapezoid and direct scrubbing is proportional to its seconds", () => {
-  const { poses, budget, height } = fixtures[0],
-    p = { ...poses[0] },
-    timeline = populateScrollTimeline(
-      gsap.timeline({ paused: true }),
-      p,
-      poses,
-      budget,
-    );
-  const animation = controlledAnimation(timeline, budget, 2); // two-angle ordinary traversal retains phase rests
-  animation.tween.pause();
-  let offset = 0;
-  for (const step of budget.steps.slice(0, 2))
-    for (const phase of step.phases) {
-      const profile = trapezoid(phase.seconds, phase.seconds);
-      assert.equal(profile(0).velocity, 0);
-      assert.equal(profile(phase.seconds).velocity, 0);
-      assert.ok(
-        Math.abs(
-          profile(RAMP_S).velocity - profile(phase.seconds - RAMP_S).velocity,
-        ) < 1e-12,
-      );
-      if (phase.kind !== "camera")
-        for (const elapsed of [
-          RAMP_S / 2,
-          RAMP_S,
-          phase.seconds / 2,
-          phase.seconds - RAMP_S / 2,
-        ]) {
-          animation.seek(offset + elapsed);
-          assert.ok(
-            Math.abs(
-              p[phase.kind] -
-                (phase.from +
-                  ((phase.to - phase.from) * profile(elapsed).distance) /
-                    phase.seconds),
-            ) < 1e-6,
-          );
+test("ordinary moves keep velocity at phase boundaries, ramp camera edges and scrub proportional to seconds", () => {
+  for (const { poses, budget, height, width } of fixtures) {
+    const p = { ...poses[0] };
+    const timeline = populateScrollTimeline(gsap.timeline({ paused: true }), p, poses, budget);
+    for (const [index, step] of budget.steps.entries()) {
+      for (const reverse of [false, true]) {
+        const start = reverse ? index + 1 : index;
+        const end = reverse ? index : index + 1;
+        const plan = planStepAnimation(budget, start, end);
+        const elapsedAt = (time) => {
+          let lo = 0, hi = plan.duration;
+          for (let k = 0; k < 60; k++) {
+            const mid = (lo + hi) / 2;
+            if ((plan.sample(mid).time - time) * (reverse ? -1 : 1) < 0) lo = mid;
+            else hi = mid;
+          }
+          return (lo + hi) / 2;
+        };
+        for (const phase of step.phases)
+          for (const boundary of [phase.start, phase.end])
+            if (boundary > index && boundary < index + 1)
+              assert.ok(Math.abs(plan.sample(elapsedAt(boundary)).velocity) > 0, "no phase stop");
+        const camera = step.phases.find((phase) => phase.kind === "camera");
+        const interiorEnd = reverse ? camera.start : camera.end;
+        if (interiorEnd > index && interiorEnd < index + 1) {
+          const special = step.phases.find((phase) => phase.kind !== "camera" &&
+            phase.start < interiorEnd && phase.end > interiorEnd);
+          assert.ok(special, "special is already in motion at the camera's interior end");
+          const at = elapsedAt(interiorEnd), dt = 0.0001;
+          timeline.time(plan.sample(at - dt).time, false);
+          const before = projectionCamera(p, width, height);
+          const mixBefore = p[special.kind];
+          timeline.time(plan.sample(at).time, false);
+          const speed = visibleScreenSpeed(points, before, projectionCamera(p, width, height), width, height, dt);
+          assert.ok(speed < CAMERA_SPEED * 0.01, `camera settled: ${speed}`);
+          assert.ok(Math.abs(p[special.kind] - mixBefore) > 0, "special continues while camera settles");
         }
-      const secondsForScrub = (phase.end - phase.start) * step.seconds;
-      assert.ok(Math.abs(secondsForScrub - phase.seconds) < 1e-12);
-      const controller = createScrollSteps(
-        poses.length,
-        () => height,
-        false,
-        Math.floor(phase.start),
-        budget.seconds,
-      );
-      controller.handle({ type: "touchStart", at: 0, time: phase.start });
-      const delta = (SCRUB_PX_PER_S * height * phase.seconds) / 2;
-      const command = controller.handle({
-        type: "touchMove",
-        at: 200,
-        time: phase.start,
-        deltaY: delta,
-      })[0];
-      assert.ok(
-        Math.abs(command.time - (phase.start + (phase.end - phase.start) / 2)) <
-          1e-12,
-      );
-      offset += phase.seconds;
+      }
+      for (const phase of step.phases) {
+        const secondsForScrub = (phase.end - phase.start) * step.seconds;
+        assert.ok(Math.abs(secondsForScrub - phase.seconds) < 1e-12);
+        const controller = createScrollSteps(poses.length, () => height, false, index, budget.seconds);
+        controller.handle({ type: "touchStart", at: 0, time: phase.start });
+        const command = controller.handle({
+          type: "touchMove", at: 200, time: phase.start,
+          deltaY: SCRUB_PX_PER_S * height * phase.seconds / 2,
+        })[0];
+        assert.ok(Math.abs(command.time - (phase.start + (phase.end - phase.start) / 2)) < 1e-12);
+      }
     }
-  animation.tween.kill();
-  timeline.kill();
+    // An extra queued angle passes the integer angle without stopping too.
+    const queued = planStepAnimation(budget, 0, 2);
+    const cruise = trapezoid(budget.seconds[0] + budget.seconds[1], queued.duration);
+    const elapsed = RAMP_S + (budget.seconds[0] - cruise(RAMP_S).distance) / cruise(RAMP_S).velocity;
+    assert.ok(Math.abs(queued.sample(elapsed).time - 1) < 1e-12);
+    assert.ok(queued.sample(elapsed).velocity > 0);
+    timeline.kill();
+  }
+});
+
+test("camera ramp ease has exact endpoints, monotonic position and continuous joins", () => {
+  for (const [a, b] of [[0, 0], [0, 0.3], [0.3, 0], [0.2, 0.4], [0.5, 0.5]]) {
+    const ease = rampEase(a, b);
+    assert.equal(ease(0), 0);
+    assert.equal(ease(1), 1);
+    let previous = 0;
+    for (let k = 0; k <= 1000; k++) {
+      const value = ease(k / 1000);
+      assert.ok(value >= previous && value <= 1);
+      previous = value;
+    }
+    const v = 1 / (1 - a / 2 - b / 2);
+    for (const join of [a, 1 - b]) {
+      assert.ok(Math.abs(ease(join) - v * (join - a / 2)) < 1e-12);
+      assert.ok(Math.abs(ease(Math.max(0, join - 1e-8)) - ease(Math.min(1, join + 1e-8))) < 1e-7);
+    }
+  }
 });
 
 test("Home/End play at JUMP_SPEEDUP without internal stops and retarget carries actual velocity", () => {

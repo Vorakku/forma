@@ -46,64 +46,39 @@ export function planStepAnimation(
   initialVelocity = 0,
 ) {
   const direction = Math.sign(to - from);
-  const phases = budget.steps
-    .flatMap((step) => step.phases)
-    .filter((p) => p.end > Math.min(from, to) && p.start < Math.max(from, to));
-  if (direction < 0) phases.reverse();
-  const pieces = phases.map((p) => {
-    const start =
-      direction > 0 ? Math.max(from, p.start) : Math.min(from, p.end);
-    const end = direction > 0 ? Math.min(to, p.end) : Math.max(to, p.start);
-    return {
-      start,
-      end,
-      seconds: (Math.abs(end - start) / (p.end - p.start)) * p.seconds,
-    };
-  });
   const total = stepDuration(from, to, budget.seconds);
-  const duration = jump ? total / JUMP_SPEEDUP : total;
-  const mapDistance = (travel: number) => {
-    let remaining = travel;
-    for (const p of pieces) {
-      if (remaining <= p.seconds)
-        return p.start + ((p.end - p.start) * remaining) / p.seconds;
-      remaining -= p.seconds;
-    }
-    return to;
-  };
-  const jumpProfile = trapezoid(
+  const speedup = jump ? JUMP_SPEEDUP : 1;
+  const duration = total / speedup;
+  const profile = trapezoid(
     total,
     duration,
     initialVelocity * direction,
-    RAMP_S / JUMP_SPEEDUP,
+    RAMP_S / speedup,
   );
-  const profiles = pieces.map((p, i) =>
-    trapezoid(p.seconds, p.seconds, i === 0 ? initialVelocity * direction : 0),
-  );
+  const mapDistance = (travel: number) => {
+    let remaining = travel;
+    let time = from;
+    while (time !== to) {
+      const index = direction > 0 ? Math.floor(time) : Math.ceil(time) - 1;
+      const end =
+        direction > 0 ? Math.min(to, index + 1) : Math.max(to, index);
+      const seconds = Math.abs(end - time) * budget.seconds[index];
+      if (remaining <= seconds)
+        return time + direction * remaining / budget.seconds[index];
+      remaining -= seconds;
+      time = end;
+    }
+    return to;
+  };
   return {
     duration,
     sample(elapsed: number) {
       if (!total || elapsed >= duration) return { time: to, velocity: 0 };
-      if (jump) {
-        const result = jumpProfile(elapsed);
-        return {
-          time: mapDistance(result.distance),
-          velocity: result.velocity * direction,
-        };
-      }
-      let remaining = Math.max(0, elapsed);
-      for (let i = 0; i < pieces.length; i++) {
-        const p = pieces[i];
-        if (remaining <= p.seconds) {
-          const result = profiles[i](remaining);
-          return {
-            time: p.start + ((p.end - p.start) * result.distance) / p.seconds,
-            velocity: result.velocity * direction,
-          };
-        }
-        remaining -= p.seconds;
-      }
-      return { time: to, velocity: 0 };
+      const result = profile(elapsed);
+      return {
+        time: mapDistance(result.distance),
+        velocity: result.velocity * direction,
+      };
     },
   };
 }
