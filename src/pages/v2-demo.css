@@ -605,3 +605,39 @@
   justify-content: space-between;
   opacity: var(--exit-chrome-opacity);
 }
+
+.v2-demo-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  fill: none;
+}
+/* 1 CSS px at every scale; the dot sizes are px too. */
+.v2-demo-lines * {
+  vector-effect: non-scaling-stroke;
+}
+.v2-demo-stage[data-angle="3"] .lines-hinge-collision {
+  display: none;
+}
+.lines-rule {
+  stroke: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.lines-faint {
+  stroke: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+.lines-mark {
+  stroke: color-mix(in srgb, var(--ink) 46%, transparent);
+}
+.lines-dotted {
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 0 8;
+}
+.lines-dot {
+  stroke: color-mix(in srgb, var(--ink) 74%, transparent);
+  stroke-width: 5;
+  stroke-linecap: round;
+}

@@ -14,6 +14,21 @@ async function ready(page: Page) {
     timeout: 30_000,
   });
   await expect(stage.locator("canvas")).toBeVisible();
+  const lines = stage.locator(".v2-demo-lines");
+  await expect(lines).toHaveCount(1);
+  await expect(lines).toHaveAttribute("aria-hidden", "true");
+  await expect(lines).toHaveAttribute("focusable", "false");
+  expect(await stage.evaluate((element) => {
+    const studio = element.querySelector(".v2-demo-studio")!;
+    const lines = element.querySelector(".v2-demo-lines")!;
+    const sheet = element.querySelector(".v2-demo-sheet")!;
+    const canvas = element.querySelector("canvas")!;
+    return [
+      studio.nextElementSibling === lines,
+      lines.nextElementSibling === sheet,
+      !!(lines.compareDocumentPosition(canvas) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ];
+  })).toEqual([true, true, true]);
   await expect(stage).toHaveAttribute("data-angle", "0");
   await expect(page.locator(".pin-spacer")).toHaveCount(0);
   return stage;
@@ -781,5 +796,19 @@ test("early exit touch scrub returns to Front with the finale copy visible", asy
     await expect(page.getByRole("heading", { name: "We couldn’t open the store" })).toHaveCount(0);
   } finally {
     await context.close();
+  }
+});
+
+ test("Hinge hides only its two colliding backdrop marks", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/v2-demo");
+  const stage = await ready(page);
+  const marks = stage.locator(".lines-hinge-collision");
+  await expect(marks).toHaveCount(2);
+  for (let angle = 0; angle < 5; angle++) {
+    if (angle) await page.keyboard.press("ArrowDown");
+    await landed(page, angle);
+    for (const mark of await marks.all())
+      await expect(mark).toHaveCSS("display", angle === 3 ? "none" : "inline");
   }
 });

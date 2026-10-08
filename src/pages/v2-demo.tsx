@@ -173,6 +173,31 @@ function PlanDrawing() {
   );
 }
 
+const BackdropLines = () => (
+  <svg className="v2-demo-lines" viewBox="-500 -500 1000 1000" aria-hidden="true" focusable="false">
+    <g className="lines-rule">
+      <path d="M-778 -2500V2500 M626 -2500V2500 M711 -2500V2500 M40 -2500V-64 M40 215V2500" />
+      <path d="M-778 -185H-462 M-778 -17H-391 M40 -64H2500 M40 215H2500" />
+    </g>
+    <g className="lines-faint">
+      <circle cx="-164" cy="-37" r="478" />
+      <circle cx="215" cy="110" r="555" />
+      <path d="M-3484 2070L1962 -2803 M-3484 -1083L2451 1538 M-2364 2274L3375 -1950" />
+      <path d="M-2460 -1805L40 -64L2540 -2529 M-2875 1516L-375 50" />
+    </g>
+    <g className="lines-mark">
+      <path d="M-871 -345h18 M-862 -354v18" />
+      <path className="lines-hinge-collision" d="M519 274h18 M528 265v18" />
+      <path className="lines-dotted" d="M-862 -221V10" />
+    </g>
+    <path
+      className="lines-dot"
+      d="M-750 -45h0 M-727 -45h0 M-704 -45h0 M668 -439h0 M668 -414h0 M-149 325h0"
+    />
+    <path className="lines-dot lines-hinge-collision" d="M768 64h0 M768 87h0 M768 110h0 M768 133h0" />
+  </svg>
+);
+
 function blocked(target: EventTarget | null) {
   return (
     useApp.getState().panel !== null ||
@@ -652,6 +677,7 @@ function V2Stage({
       aria-busy={!ready && !unavailable && !empty}
     >
       <div className="v2-demo-studio" aria-hidden="true" />
+      <BackdropLines />
       <div className="v2-demo-sheet" aria-hidden="true" />
       {/* Front view: the headline sits behind the canvas so the frame overlaps it. */}
       {ready && !unavailable && (
