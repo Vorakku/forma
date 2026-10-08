@@ -1869,3 +1869,107 @@ test("shop ignores V2 environment and tone parameters and retains its original f
   assert.equal(renderer.toneMappingExposure, 1.45);
   viewer.dispose();
 });
+
+function captureToneRenderer(h) {
+  const Original = h.Renderer;
+  h.Renderer = class extends Original {
+    constructor(...args) {
+      super(...args);
+      this.exposureWrites = [];
+      this.compositeDraws = [];
+    }
+    set toneMappingExposure(value) {
+      this.exposureWrites.push(value);
+      this.exposure = value;
+    }
+    get toneMappingExposure() {
+      return this.exposure;
+    }
+    render(scene, camera) {
+      const material = scene.children.find((node) => node.material?.uniforms?.mixAmount)?.material;
+      if (material)
+        this.compositeDraws.push({
+          material,
+          operator: material.defines.STUDIO_TONE_MAPPING,
+          exposure: material.uniforms.toneMappingExposure.value,
+          version: material.version,
+        });
+      super.render(scene, camera);
+    }
+  };
+}
+
+test("V2 tone queries set one fixed exposure and the composite matches the renderer for every variant and fallback", () => {
+  for (const [search, mapping, exposure, operator] of [
+    ["", THREE.ACESFilmicToneMapping, 1.45, "ACESFilmicToneMapping"],
+    ["?tone=aces", THREE.ACESFilmicToneMapping, 1.45, "ACESFilmicToneMapping"],
+    ["?tone=neutral&env=soft", THREE.NeutralToneMapping, 1, "NeutralToneMapping"],
+    ["?tone=agx&env=window", THREE.AgXToneMapping, 1, "AgXToneMapping"],
+    ["?tone=unknown", THREE.ACESFilmicToneMapping, 1.45, "ACESFilmicToneMapping"],
+  ]) {
+    const h = devices({ search });
+    captureToneRenderer(h);
+    const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+    viewer.setObject(buildDisplayGlasses(product(), 0));
+    const poses = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius);
+    const renderer = h.renderers[0];
+    assert.equal(renderer.toneMapping, mapping);
+    assert.equal(renderer.toneMappingExposure, exposure);
+    viewer.setPose({ ...poses[2], blueprint: 0 });
+    const initialRenders = renderer.renders;
+    for (const mix of [0.2, 0.8, 1, 0]) {
+      viewer.setPose({ ...poses[2], blueprint: mix });
+      assert.equal(renderer.toneMapping, mapping);
+      assert.equal(renderer.toneMappingExposure, exposure);
+    }
+    assert.equal(renderer.renders - initialRenders, 6, "tone selection adds no render passes");
+    assert.equal(renderer.compositeDraws.length, 2);
+    for (const draw of renderer.compositeDraws) {
+      assert.equal(draw.operator, operator);
+      assert.equal(draw.exposure, exposure);
+      assert.equal(draw.material.toneMapped, false, "the composite applies its operator exactly once");
+      assert.match(draw.material.fragmentShader, /a\.rgb = STUDIO_TONE_MAPPING\(a\.rgb \/ max\(a\.a, 0\.00001\)\) \* a\.a/);
+      assert.match(draw.material.fragmentShader, /#include <tonemapping_pars_fragment>/);
+      assert.ok(THREE.ShaderChunk.tonemapping_pars_fragment.includes("vec3 " + draw.operator + "( vec3 color )"));
+    }
+    assert.equal(renderer.compositeDraws[0].version, renderer.compositeDraws[1].version, "a stable operator does not recompile per frame");
+    for (const pose of poses) viewer.setPose(pose);
+    assert.deepEqual(renderer.exposureWrites, [exposure], "motion and fades never write renderer exposure");
+    assert.equal(h.callbacks.size, 0);
+    assert.equal(renderer.getRenderTarget(), null);
+    viewer.dispose();
+  }
+});
+
+test("blueprint composite recompiles when its renderer operator changes and keeps linear cached images", () => {
+  const h = devices();
+  captureToneRenderer(h);
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const pose = { ...resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor)[2], blueprint: 0.5 };
+  viewer.setPose(pose);
+  const renderer = h.renderers[0];
+  let version = renderer.compositeDraws.at(-1).version;
+  for (const [mapping, operator] of [
+    [THREE.NeutralToneMapping, "NeutralToneMapping"],
+    [THREE.AgXToneMapping, "AgXToneMapping"],
+    [THREE.ACESFilmicToneMapping, "ACESFilmicToneMapping"],
+  ]) {
+    renderer.toneMapping = mapping;
+    let renders = renderer.renders;
+    viewer.setPose(pose);
+    let draw = renderer.compositeDraws.at(-1);
+    assert.equal(draw.operator, operator);
+    assert.equal(draw.version, version + 1);
+    assert.equal(renderer.renders - renders, 1);
+    version = draw.version;
+    renders = renderer.renders;
+    viewer.setPose(pose);
+    draw = renderer.compositeDraws.at(-1);
+    assert.equal(draw.version, version);
+    assert.equal(renderer.renders - renders, 1);
+  }
+  assert.deepEqual(renderer.exposureWrites, [1.45]);
+  assert.equal(h.callbacks.size, 0);
+  viewer.dispose();
+});
