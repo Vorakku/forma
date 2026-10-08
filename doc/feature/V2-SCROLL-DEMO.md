@@ -20,14 +20,14 @@ Input:
 - One wheel notch or a fast flick steps once. A slow wheel or a touch drag scrubs between neighbouring angles and settles when idle or released.
 - Arrow keys, Page Up/Down and Space step. Home/End jump to either end at `JUMP_SPEEDUP` (2×).
 - Retargeting mid-flight carries the current velocity, with at most one extra queued angle.
-- A fresh forward key, wheel notch/flick or released swipe after Front lands plays the one-way finale exit. End never exits; wheel momentum must idle after landing, and key repeat cannot exit.
-- Reduced motion cuts angles instantly, including the blueprint theme swap, and uses short ink fades for the exit.
+- A fresh forward key or wheel notch/flick after Front lands plays the sixth timeline position (4 → 5). Slow wheel and touch scrub the dolly both ways; early release returns to Front and landing on 5 commits. End/jumps stop at 4, Home inside the exit returns to 0, momentum must idle after landing, and key repeat cannot exit.
+- Reduced motion cuts angles instantly, including the blueprint theme swap, and cuts directly to the paper endpoint, holds 0.15 s, and uses a short opacity-only paper reveal.
 
 Gesture rules and all tuning constants are in `src/tryon/scroll-steps.ts`.
 
 ## Motion model
 
-- **Timeline** (`scroll-timeline.ts`): one paused GSAP timeline where integer time *n* is exactly angle *n*. The camera spans every whole step `[i, i+1]` with `ease: "none"`; its progress is mapped through projected path length. Effects are linear scalar tweens inside that camera move. There is no interior camera ramp or handoff overlap.
+- **Timeline** (`scroll-timeline.ts`): one paused GSAP timeline where integer time *n* is exactly angle *n*. The camera spans every whole step `[i, i+1]` with `ease: "none"`; its progress is mapped through projected path length. Effects are linear scalar tweens inside that camera move. There is no interior camera ramp or handoff overlap. The page appends the isolated exit scalar across [4, 5]; it is not a pose-table row.
 - **Budget** (`scroll-budget.ts`): a step takes only its camera seconds: `RAMP_S + projectedLength / (CAMERA_SPEED × pace)`. Projected length measures how far 300 surface points on the assembled frame travel across the screen (`screen-motion.ts`). An effect adds no time; its seconds are its share of the step multiplied by the camera seconds.
   - 0→1: explode 0→1 across the whole move. No delayed start was needed: the unchanged in-motion fit guard passes with `start = 0`.
   - 1→2: explode closes over `[1, 1.5]`, then blueprint builds over `[1.5, 2]`, reaching full blueprint exactly when the camera lands. At the midpoint both effects are zero; halfway through the blueprint window (time 1.75), blueprint is 0.5.
@@ -66,7 +66,7 @@ Round 3 locks in the strip environment and Neutral tone chosen in the Round 2 vi
 
 ## Copy
 
-Added 2026-10-08. Each angle has its own text, laid out in `src/pages/v2-demo.tsx` and placed in `v2-demo.css`. A block carries `data-for-angle="n"` and is shown only while the stage is landed on that angle: `[data-angle="n"]` set and `data-moving` absent. It cuts out as soon as the camera moves and cuts back in on landing. Angle arrivals have no copy transition; the finale's zoom-through exit is specified in [V2-FINALE-EXIT.md](V2-FINALE-EXIT.md).
+Added 2026-10-08. Each angle has its own text, laid out in `src/pages/v2-demo.tsx` and placed in `v2-demo.css`. A block carries `data-for-angle="n"` and, outside the exit segment, is shown only while the stage is landed on that angle: `[data-angle="n"]` set and `data-moving` absent. It cuts out as soon as the camera moves and cuts back in on landing. Angle arrivals have no copy transition; the finale's zoom-through exit is specified in [V2-FINALE-EXIT.md](V2-FINALE-EXIT.md).
 
 | # | Angle | Copy | Placement (landscape) | Narrow screens |
 |---|---|---|---|---|
@@ -74,9 +74,9 @@ Added 2026-10-08. Each angle has its own text, laid out in `src/pages/v2-demo.ts
 | 1 | Side, exploded | `PARTS`: 01 Temples 140 mm, 02 Front 52–18, 03 Lenses 52 × 37 mm | Beside each part: temples left, front above, lenses right | ≤ 1:1: temples above, front and lenses side by side below |
 | 2 | Top / blueprint | Drafting sheet (`PlanDrawing`): view title, dimension lines (131 tip spread, 140 temple, 52·18·52 chain, 140 overall), leader notes A–C, title block | Title top-left, title block bottom-left, notes left of the frame with orthogonal leaders | ≤ 4:3: notes become a list under the title, chain and leaders hidden, title block top-right; phones (≤ 640px): title block under the drawing; short phones (≤ 700px tall): title row only |
 | 3 | Hinge detail | `DETAILS`: 01 Pinned front, 02 Hinge, 03 Hand polish | Equal steps rising beside the temple | ≤ 16:10: stacked bottom-right; ≤ 1:1: stacked at the bottom over a paper fade |
-| 4 | Front | Finale: eyebrow "FORMA Eyewear.", two-line headline "Made to / be seen", *The Ellis* aside, bottom-left spec line, round warm CTA; fresh forward gesture zooms through the E to exit | Headline split around the frame and rendered **before the canvas**, so the frame overlaps it; line 1 left-aligned to the frame's left end, line 2 right-aligned to its right end | ≤ 1:1: lines on the page gutters, aside under line 2 |
+| 4 | Front | Finale: eyebrow "FORMA Eyewear.", two-line headline "Made to / be seen", *The Ellis* aside, bottom-left spec line, round warm CTA; fresh forward gesture dollies through the nose gap with the entire finale copy layer scaling with the frame | Headline split around the frame and rendered **before the canvas**, so the frame overlaps it; line 1 left-aligned to the frame's left end, line 2 right-aligned to its right end | ≤ 1:1: lines on the page gutters, aside under line 2 |
 
-**Exit:** once Front is landed, a fresh forward gesture plays a 0.9 s accelerating headline zoom from inside the E of MADE, fades the surrounding copy and canvas, and fills the stage with ink. After a 0.15 s hold, the online route navigates to `/` and the offline demo restores StoreUnavailable. Both destinations share a 0.6 s blur-in reveal, remove the filter afterwards, and focus their main heading. Reduced motion uses two 0.2 s ink fades with no zoom or blur. The input machine swallows all later input after exit.
+**Exit:** Front → position 5 is a 1.6 s step on the same paused timeline, driven by `pose.exit`. The camera translates toward P (centre x, centre y − 1 cqmin, unprojected onto the model front plane) with fixed orientation and depth `d0 / 40^u`. The headline, eyebrow and aside stay visible during motion and scale as one layer by `40^u`, about that projected point. Stationary spec/CTA/header fade over u = 0–0.25; paper covers the scene over u = 0.85–1. Slow scrubs are reversible and early release settles back; a notch/flick plays the move. Only landing on 5 commits: hold paper 0.15 s, then navigate to `/` online or restore StoreUnavailable offline. Both share a 0.6 s paper/blur reveal, remove its filter afterwards and focus the heading. Reduced motion cuts to 5 and uses a 0.2 s paper-only reveal. After landing on 5 the machine swallows all input. See [the finale spec](V2-FINALE-EXIT.md) for the near/far rule, settle threshold and verification.
 
 Positioning:
 - The camera fits the frame to the shorter stage side, so the frame's on-screen size is a fixed fraction of `min(width, height)`. Angles 2–4 position copy in those units: `cqmin` inside a `container-type: size` wrapper (100cqmin = shorter side), offset from the stage centre.
@@ -114,12 +114,14 @@ No explode-start delay was needed. The fit test passes with the 0→1 explode sp
 
 ## Files
 
-- `src/pages/v2-demo.tsx`, `v2-demo.css`: stage, input wiring (GSAP Observer), header fade, theme swatches, offline fallback, per-angle copy, blueprint drafting sheet and the zoom/ink exit timeline.
+- `src/pages/v2-demo.tsx`, `v2-demo.css`: stage, input wiring (GSAP Observer), header fade, theme swatches, offline fallback, per-angle copy, blueprint drafting sheet and the scrubbable dolly/paper exit segment.
 - `public/fonts/big-shoulders-display-600.woff2`: self-hosted heading font.
 - `src/tryon/scroll-poses.ts`: angle table and pose resolution.
-- `src/tryon/scroll-steps.ts`: gesture state machine, one-way exit command, inertia guard and tuning constants.
+- `src/tryon/scroll-steps.ts`: gesture state machine, sixth-position commit, inertia/repeat guards and tuning constants.
 - `src/App.tsx`: offline StoreUnavailable destination and one-time online route state.
 - `src/components/exit-reveal.tsx`, `exit-reveal.css`: shared destination reveal, filter cleanup and heading focus.
+- `src/tryon/scroll-exit.ts`: front-plane target, fixed-orientation dolly, near/far restoration, exit-only budget/timeline append.
+- `tests/scroll-exit.test.mjs`: isolated dolly/projection and timeline/resize tests.
 - `src/tryon/scroll-budget.ts`, `screen-motion.ts`: per-step phase seconds from projected screen motion.
 - `src/tryon/scroll-timeline.ts`: builds the GSAP timeline from the budget.
 - `src/tryon/scroll-animation.ts`: trapezoid driver, retarget velocity, pause/resume.
@@ -130,7 +132,7 @@ No explode-start delay was needed. The fit test passes with the 0→1 explode sp
 
 ## Verification
 
-Finale exit (2026-10-08): typecheck, all 95 unit tests and build pass. Existing motion, fit, projection, budget, timeline and lighting tests remain unchanged. Added 14 step-machine cases and three E2E cases. `npm run test:e2e` was not run because `../server` is missing. Offline Chromium checks at 1920 × 945 and 375 × 812 verify End, fresh wheel/key/swipe exits, inertia across landing, focus, keyboard retry, overflow restoration and filter removal. Reduced exit takes about 0.42 s after the on-demand Front frame renders. A server-free smoke test with mocked API responses verifies the online home/header, scrolling, cleared route state, refresh and Back. [Captures and details](V2-FINALE-EXIT.md#implementation-verification).
+Finale exit R2 (2026-10-08): typecheck, all 95 unit tests and build pass. Existing motion, fit, projection, budget, timeline and lighting test files remain unchanged; the exit is tested separately. Twelve exit machine cases, two dolly/timeline cases and four destination/scrub E2E cases cover the revision. `npm run test:e2e` was not run because `../server` is missing. Offline Chromium checks at 1920 × 945 and 375 × 812 confirm P in the nose gap, growing glasses/type, reversible touch scrub and early return, paper endpoints, heading focus, overflow restoration and filter removal. The reduced cut/hold/reveal takes about 0.354 s with no blur. [Captures, resolved P and implementation notes](V2-FINALE-EXIT.md#implementation-verification).
 
 - `npm run typecheck`, `npm test` (81 tests) and `npm run build` pass after Round 3. Variant/fallback coverage and the operator-change recompile test were removed; the single-environment and fixed Neutral/exposure checks remain.
 - The projection guard passes forward and reverse at both sizes, with the same evenness/spike limits and the 1.237 s first-camera pin. The camera-window offset is now zero in either direction.

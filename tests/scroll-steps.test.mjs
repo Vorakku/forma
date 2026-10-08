@@ -18,13 +18,14 @@ const { createScrollSteps, stepDuration, GESTURE_IDLE_MS } = await import(
 );
 after(() => rm(output, { force: true }));
 
-function harness(count = 5, reduced = false, angle = 0) {
+function harness(count = 5, reduced = false, angle = 0, exit = false) {
   const controller = createScrollSteps(
     count,
     () => 1000,
     reduced,
     angle,
-    Array(count - 1).fill(2),
+    [...Array(count - 1).fill(2), ...(exit ? [1.6] : [])],
+    exit,
   );
   let time = angle;
   const send = (type, at, fields = {}) => {
@@ -136,7 +137,7 @@ test("touch holds scrub without idle settling; release follows last movement; ta
 
 test("bounds, ctrl/horizontal wheel, blocked UI and editable/interactive focus ignore input", () => {
   assert.deepEqual(harness().wheel(-100, 0), []);
-  assert.deepEqual(harness(5, false, 4).wheel(100, 0), [{ type: "exit" }]);
+  assert.deepEqual(harness(5, false, 4).wheel(100, 0), []);
   const h = harness();
   assert.deepEqual(h.wheel(100, 0, { ctrlKey: true }), []);
   assert.deepEqual(h.wheel(100, 0, { deltaX: 101 }), []);
@@ -264,164 +265,140 @@ test("budget seconds weight scrub pixels, update live on resize, and preserve ge
   );
 });
 
-const exitCommand = [{ type: "exit" }];
+const finale = (reduced = false, angle = 4) => harness(5, reduced, angle, true);
 
-test("fresh forward keys exit only from landed Front", () => {
-  for (const key of ["ArrowDown", "PageDown", " "]) {
-    assert.deepEqual(harness(5, false, 4).send("key", 0, { key }), exitCommand);
-    assert.deepEqual(harness().send("key", 0, { key }), animate(1));
+test("fresh forward keys and wheel gestures step Front to position 5", () => {
+  for (const key of ["ArrowDown", "PageDown", " "])
+    assert.deepEqual(finale().send("key", 0, { key }), animate(5));
+  assert.deepEqual(finale().wheel(100, 0), animate(5));
+  const flick = finale();
+  assert.deepEqual(flick.wheel(20, 0), [{ type: "scrubTo", time: 4.05 }]);
+  assert.deepEqual(flick.wheel(20, 30), animate(5));
+});
+
+test("slow wheel and touch scrub the exit; early release returns and late release commits", () => {
+  for (const travel of [100, 300]) {
+    const h = finale();
+    h.send("touchStart", 0);
+    assert.deepEqual(h.send("touchMove", 200, { deltaY: travel }), [
+      { type: "scrubTo", time: 4 + travel / 400 },
+    ]);
+    assert.deepEqual(h.send("touchEnd", 300), animate(travel < 200 ? 4 : 5));
+  }
+  const wheel = finale();
+  for (let n = 0; n < 10; n++) wheel.wheel(4, n * 30);
+  assert.equal(wheel.time, 4.1);
+  assert.deepEqual(wheel.send("idle", 270 + GESTURE_IDLE_MS), animate(4));
+});
+
+test("exit scrub can reverse, cancel and be interrupted before commitment", () => {
+  const h = finale();
+  h.send("touchStart", 0);
+  h.send("touchMove", 200, { deltaY: 300 });
+  h.send("touchMove", 220, { deltaY: -100 });
+  assert.equal(h.time, 4.5);
+  assert.deepEqual(h.send("touchEnd", 300), animate(4));
+  const cancelled = finale();
+  cancelled.send("touchStart", 0);
+  cancelled.send("touchMove", 200, { deltaY: 300 });
+  assert.deepEqual(cancelled.send("touchEnd", 300, { cancelled: true }), animate(4));
+  const flight = finale();
+  flight.send("key", 0, { key: "ArrowDown" });
+  flight.setTime(4.7);
+  flight.send("touchStart", 200);
+  assert.deepEqual(flight.send("touchMove", 400, { deltaY: -200 }), [{ type: "scrubTo", time: 4.2 }]);
+  assert.deepEqual(flight.send("touchEnd", 500), animate(4));
+});
+
+test("End and jumps stop at Front; Home returns from inside the exit", () => {
+  assert.deepEqual(finale().send("key", 0, { key: "End" }), []);
+  assert.deepEqual(finale(false, 0).send("key", 0, { key: "End" }), animate(4, true));
+  for (const key of ["Home", "End"]) {
+    const h = finale();
+    h.send("key", 0, { key: "ArrowDown" });
+    h.setTime(4.5);
+    assert.deepEqual(h.send("key", 100, { key }), animate(key === "Home" ? 0 : 4, true));
   }
 });
 
-test("End, Home, backward keys and repeated forward keys never exit", () => {
-  for (const key of ["End", "Home", "ArrowUp", "PageUp", " "]) {
-    const commands = harness(5, false, 4).send("key", 0, { key, shiftKey: key === " " });
-    assert.ok(commands.every((command) => command.type !== "exit"));
-  }
+test("forward repeat stops at Front; backward input still steps", () => {
   for (const key of ["ArrowDown", "PageDown", " "])
-    assert.deepEqual(harness(5, false, 4).send("key", 0, { key, repeat: true }), []);
-  // Auto-repeat can advance through the angles, but stops once Front lands.
-  const h = harness(5, false, 3);
+    assert.deepEqual(finale().send("key", 0, { key, repeat: true }), []);
+  const h = finale(false, 3);
   assert.deepEqual(h.send("key", 0, { key: "ArrowDown", repeat: true }), animate(4));
   h.setTime(4);
   h.send("landed", 100, { angle: 4 });
-  assert.deepEqual(h.send("key", 110, { key: "ArrowDown", repeat: true }), []);
-  assert.deepEqual(h.send("key", 120, { key: "ArrowDown" }), exitCommand);
+  assert.deepEqual(h.send("key", 200, { key: "ArrowDown", repeat: true }), []);
+  assert.deepEqual(finale().send("key", 0, { key: "ArrowUp" }), animate(3));
+  assert.deepEqual(finale().wheel(-100, 0), animate(3));
 });
 
-test("a target in flight or queued at Front cannot exit", () => {
-  const h = harness(5, false, 2);
+test("in-flight and queued Front cannot queue the exit", () => {
+  const h = finale(false, 2);
   h.send("key", 0, { key: "ArrowDown" });
-  h.setTime(2.4);
-  h.send("key", 100, { key: "ArrowDown" }); // Queue Front beyond Hinge.
-  for (const key of ["ArrowDown", "PageDown", " "])
-    assert.ok(h.send("key", 200, { key }).every((c) => c.type !== "exit"));
-  h.setTime(4); // Even exact timeline time is insufficient before landing.
-  assert.ok(h.send("key", 300, { key: "ArrowDown" }).every((c) => c.type !== "exit"));
-  assert.ok(h.wheel(100, 500).every((c) => c.type !== "exit"));
-  h.send("landed", 600, { angle: 4 });
-  assert.deepEqual(h.send("key", 610, { key: "ArrowDown" }), exitCommand);
+  h.setTime(2.5);
+  h.send("key", 100, { key: "ArrowDown" });
+  assert.deepEqual(h.send("key", 200, { key: "ArrowDown" }), animate(4));
+  h.setTime(4);
+  assert.deepEqual(h.send("key", 300, { key: "ArrowDown" }), animate(4));
+  h.send("landed", 400, { angle: 4 });
+  assert.deepEqual(h.send("key", 500, { key: "ArrowDown" }), animate(5));
 });
 
-test("Front exits on a fresh wheel notch or fast accumulation", () => {
-  assert.deepEqual(harness(5, false, 4).wheel(100, 0), exitCommand);
-  const flick = harness(5, false, 4);
-  assert.deepEqual(flick.wheel(20, 0), []);
-  assert.deepEqual(flick.wheel(20, 30), exitCommand);
-  const slow = harness(5, false, 4);
-  for (let n = 0; n < 20; n++) assert.deepEqual(slow.wheel(4, n * 30), []);
-  assert.deepEqual(slow.send("idle", 570 + GESTURE_IDLE_MS), []);
-  assert.deepEqual(harness(5, false, 4).wheel(-100, 0), animate(3));
-});
-
-test("wheel inertia spanning Front landing cannot exit until a new idle gesture", () => {
-  const h = harness(5, false, 3);
+test("momentum spanning landing stays at Front until a fresh idle gesture", () => {
+  const h = finale(false, 3);
   assert.deepEqual(h.wheel(100, 0), animate(4));
   h.setTime(4);
   h.send("landed", 100, { angle: 4 });
   for (let at = 120; at < 1200; at += 16) assert.deepEqual(h.wheel(50, at), []);
-  assert.deepEqual(h.wheel(100, 1200 + GESTURE_IDLE_MS), exitCommand);
+  assert.deepEqual(h.wheel(100, 1200 + GESTURE_IDLE_MS), animate(5));
 });
 
-test("landing starts the wheel idle guard even if the previous gesture ended", () => {
-  const h = harness(5, false, 3);
-  h.wheel(100, 0);
-  h.send("idle", GESTURE_IDLE_MS);
-  h.setTime(4);
-  h.send("landed", 1000, { angle: 4 });
-  assert.deepEqual(h.wheel(100, 1000 + GESTURE_IDLE_MS - 1), []);
-  assert.deepEqual(h.wheel(100, 1300), []); // Continuing momentum remains consumed.
-  assert.deepEqual(h.wheel(100, 1300 + GESTURE_IDLE_MS), exitCommand);
-});
-
-test("Front touch never scrubs and exits only on qualifying forward release", () => {
-  for (const travel of [8, 100]) {
-    const h = harness(5, false, 4);
-    h.send("touchStart", 0);
-    assert.deepEqual(h.send("touchMove", 30, { deltaY: travel }), []);
-    assert.equal(h.time, 4);
-    assert.deepEqual(h.send("touchEnd", 100), exitCommand);
+test("landing guards new wheel and touch input for the full idle window", () => {
+  for (const kind of ["wheel", "touch"]) {
+    const h = finale(false, 3);
+    h.send("key", 0, { key: "End" });
+    h.setTime(4);
+    h.send("landed", 1000, { angle: 4 });
+    if (kind === "wheel") {
+      assert.deepEqual(h.wheel(100, 1179), []);
+      assert.deepEqual(h.wheel(100, 1300), []);
+      assert.deepEqual(h.wheel(100, 1480), animate(5));
+    } else {
+      h.send("touchStart", 1179);
+      assert.deepEqual(h.send("touchMove", 1300, { deltaY: 300 }), []);
+      assert.ok(h.send("touchEnd", 1400).every((c) => c.angle !== 5));
+    }
   }
-  for (const fields of [{ travel: 7 }, { travel: 100, cancelled: true }]) {
-    const h = harness(5, false, 4);
-    h.send("touchStart", 0);
-    h.send("touchMove", 30, { deltaY: fields.travel });
-    assert.deepEqual(h.send("touchEnd", 100, { cancelled: fields.cancelled }), []);
-  }
-  const backward = harness(5, false, 4);
-  backward.send("touchStart", 0);
-  assert.equal(backward.send("touchMove", 200, { deltaY: -100 })[0].type, "scrubTo");
-  assert.deepEqual(backward.send("touchEnd", 300), animate(3));
-  const reversed = harness(5, false, 4);
-  reversed.send("touchStart", 0);
-  reversed.send("touchMove", 30, { deltaY: 100 });
-  reversed.send("touchMove", 50, { deltaY: -10 });
-  assert.ok(reversed.send("touchEnd", 100).every((c) => c.type !== "exit"));
 });
 
-test("touch starting in flight cannot turn its landing into an exit", () => {
-  const h = harness(5, false, 3);
-  h.send("key", 0, { key: "End" });
-  h.setTime(4);
-  h.send("touchStart", 100);
-  h.send("landed", 110, { angle: 4 });
-  assert.deepEqual(h.send("touchMove", 120, { deltaY: 100 }), []);
-  assert.deepEqual(h.send("touchEnd", 150), []);
+test("reduced exit cuts to 5 and uses the same repeat and inertia guard", () => {
+  assert.deepEqual(finale(true).send("key", 0, { key: "ArrowDown" }), [{ type: "cutTo", angle: 5 }]);
+  assert.deepEqual(finale(true).wheel(100, 0), [{ type: "cutTo", angle: 5 }]);
+  assert.deepEqual(finale(true).send("key", 0, { key: "ArrowDown", repeat: true }), []);
+  const h = finale(true, 3);
+  h.send("key", 1000, { key: "ArrowDown" });
+  assert.deepEqual(h.wheel(100, 1050), []);
+  assert.deepEqual(h.wheel(100, 1230), [{ type: "cutTo", angle: 5 }]);
 });
 
-test("reduced motion uses the same exit and inertia rules", () => {
-  assert.deepEqual(harness(5, true, 4).send("key", 0, { key: "ArrowDown" }), exitCommand);
-  assert.deepEqual(harness(5, true, 4).wheel(100, 0), exitCommand);
-  const h = harness(5, true, 3);
-  assert.deepEqual(h.wheel(100, 0), [{ type: "cutTo", angle: 4 }]);
-  h.send("landed", 0, { angle: 4 });
-  assert.deepEqual(h.wheel(100, 50), []);
-  assert.deepEqual(h.wheel(100, 50 + GESTURE_IDLE_MS), exitCommand);
-  const touch = harness(5, true, 4);
-  touch.send("touchStart", 0);
-  assert.deepEqual(touch.send("touchMove", 30, { deltaY: 100 }), []);
-  assert.deepEqual(touch.send("touchEnd", 100), exitCommand);
-});
-
-test("an exited machine swallows every later event and reduced-mode changes", () => {
-  const h = harness(5, false, 4);
+test("landing on 5, rather than a partial scrub, swallows all later input", () => {
+  const h = finale();
   h.send("key", 0, { key: "ArrowDown" });
+  h.setTime(5);
+  h.send("landed", 2000, { angle: 5 });
   for (const event of [
     { type: "wheel", deltaY: 100 }, { type: "wheel", deltaY: -100 },
     { type: "idle" }, { type: "touchStart" }, { type: "touchMove", deltaY: 100 },
     { type: "touchEnd" }, { type: "key", key: "Home" },
     { type: "key", key: "End" }, { type: "key", key: "ArrowDown" },
     { type: "landed", angle: 0 },
-  ]) assert.deepEqual(h.send(event.type, 1000, event), []);
-  assert.deepEqual(h.controller.setReduced(true, 4), []);
+  ]) assert.deepEqual(h.send(event.type, 3000, event), []);
+  assert.deepEqual(h.controller.setReduced(true, 5), []);
 });
 
-test("scrubbing back to exact Front time is not a landing", () => {
-  const h = harness(5, false, 4);
-  h.send("touchStart", 0);
-  h.send("touchMove", 200, { deltaY: -100 });
-  h.send("touchMove", 300, { deltaY: 100 });
-  assert.equal(h.time, 4);
-  assert.ok(h.send("key", 400, { key: "ArrowDown" }).every((c) => c.type !== "exit"));
-});
-
-test("reduced key landing starts the wheel guard without a separate landed event", () => {
-  const h = harness(5, true, 3);
-  h.send("key", 1000, { key: "ArrowDown" });
-  assert.deepEqual(h.wheel(100, 1050), []);
-  assert.deepEqual(h.wheel(100, 1050 + GESTURE_IDLE_MS), exitCommand);
-});
-
-test("changing reduced motion during a Front touch does not act as release", () => {
-  const h = harness(5, false, 4);
-  h.send("touchStart", 0);
-  h.send("touchMove", 20, { deltaY: 100 });
-  assert.deepEqual(h.controller.setReduced(true, 4), [{ type: "cutTo", angle: 4 }]);
-  assert.deepEqual(h.send("touchEnd", 100), exitCommand);
-});
-
-test("blocked and modified inputs at Front retain the exit boundary", () => {
-  const h = harness(5, false, 4);
+test("blocked or modified Front input cannot enter the exit", () => {
+  const h = finale();
   for (const fields of [{ ctrlKey: true }, { deltaX: 101 }, { blocked: true }])
     assert.deepEqual(h.wheel(100, 0, fields), []);
   for (const fields of [
@@ -429,5 +406,18 @@ test("blocked and modified inputs at Front retain the exit boundary", () => {
     { key: "ArrowDown", blocked: true },
     { key: " ", interactive: true },
   ]) assert.deepEqual(h.send("key", 0, fields), []);
-  assert.deepEqual(h.send("key", 0, { key: "ArrowDown" }), exitCommand);
+  assert.deepEqual(h.send("key", 0, { key: "ArrowDown" }), animate(5));
+});
+
+
+test("quick forward touch flick plays the exit but cannot bypass landing idle", () => {
+  const h = finale();
+  h.send("touchStart", 0);
+  assert.deepEqual(h.send("touchMove", 40, { deltaY: 50 }), [{ type: "scrubTo", time: 4.125 }]);
+  assert.deepEqual(h.send("touchEnd", 80), animate(5));
+  const guarded = finale();
+  guarded.send("landed", 1000, { angle: 4 });
+  guarded.send("touchStart", 1010);
+  assert.deepEqual(guarded.send("touchMove", 1050, { deltaY: 50 }), []);
+  assert.ok(guarded.send("touchEnd", 1090).every((command) => command.angle !== 5));
 });

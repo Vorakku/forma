@@ -28,6 +28,7 @@ export type ScenePose = OrbitPose & {
   explode: number;
   blueprint: number;
   light: number;
+  exit: number;
 };
 
 export function clampPhi(phi: number) {
@@ -59,6 +60,7 @@ export function resolveScrollPoses(
       explode: Number(angle.exploded),
       blueprint: Number(angle.blueprint),
       light: index,
+      exit: 0,
     };
   });
 }

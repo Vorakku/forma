@@ -683,13 +683,13 @@ test("finale exits online to a usable home Shell and reveals only once", async (
   await expect(wrapper).toHaveCSS("filter", "none");
   await expect(wrapper).toHaveCSS("transform", "none");
   await expect(wrapper).toHaveCSS("will-change", "auto");
-  await expect(page.locator(".exit-reveal-ink")).toHaveCount(0);
+  await expect(page.locator(".exit-reveal-paper")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => history.state.usr)).toBeNull();
   await page.mouse.wheel(0, 600);
   await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(100);
   await page.reload();
   await expect(page.locator("main h1").first()).toBeVisible();
-  await expect(page.locator(".exit-reveal-ink")).toHaveCount(0);
+  await expect(page.locator(".exit-reveal-paper")).toHaveCount(0);
   await page.goBack();
   await ready(page);
 });
@@ -713,10 +713,10 @@ test("offline finale reveals and focuses StoreUnavailable; retry stays there", a
   await retry.click();
   await expect(heading).toBeVisible();
   await expect(page.locator(".v2-demo-stage")).toHaveCount(0);
-  await expect(page.locator(".exit-reveal-ink")).toHaveCount(0);
+  await expect(page.locator(".exit-reveal-paper")).toHaveCount(0);
 });
 
-test("reduced-motion finale completes both ink fades in under 0.6 seconds", async ({ page }) => {
+test("reduced-motion finale completes both paper hold and reveal in under 0.6 seconds", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.route("**/api/**", (route) => route.fulfill({ status: 502, body: "offline" }));
   await page.goto("/");
@@ -742,4 +742,44 @@ test("reduced-motion finale completes both ink fades in under 0.6 seconds", asyn
   const elapsed = await page.evaluate(() => (window as typeof window & { exitElapsed?: number }).exitElapsed);
   expect(elapsed).toBeLessThan(600);
   await expect(page.locator(".exit-reveal-content")).toHaveCSS("filter", "none");
+});
+
+
+test("early exit touch scrub returns to Front with the finale copy visible", async ({ browser }) => {
+  const context = await browser.newContext({
+    hasTouch: true,
+    viewport: { width: 375, height: 812 },
+    baseURL: "http://localhost:4176",
+  });
+  const page = await context.newPage();
+  try {
+    await page.route("**/api/**", (route) => route.fulfill({ status: 502, body: "offline" }));
+    await page.goto("/");
+    const stage = await ready(page);
+    await page.keyboard.press("End");
+    await landed(page, 4);
+    await page.waitForTimeout(200);
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart", touchPoints: [{ x: 180, y: 600 }],
+    });
+    for (let n = 1; n <= 8; n++) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove", touchPoints: [{ x: 180, y: 600 - n * 10 }],
+      });
+      await page.waitForTimeout(40);
+    }
+    await expect(stage).toHaveAttribute("data-moving", "true");
+    await expect.poll(() => stage.getAttribute("data-exit").then(Number)).toBeGreaterThan(0);
+    await expect.poll(() => stage.getAttribute("data-exit").then(Number)).toBeLessThan(0.5);
+    await expect(stage.locator(".v2-demo-finale")).toBeVisible();
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await landed(page, 4);
+    await expect(stage).not.toHaveAttribute("data-exit");
+    await expect(stage.locator(".v2-demo-finale")).toBeVisible();
+    await expect(stage.locator(".v2-demo-finale")).toHaveCSS("transform", "none");
+    await expect(page.getByRole("heading", { name: "We couldn’t open the store" })).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
 });

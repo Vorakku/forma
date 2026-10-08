@@ -56,7 +56,7 @@ export function ExitReveal({
       </div>
       {revealing && (
         <div
-          className="exit-reveal-ink"
+          className="exit-reveal-paper"
           aria-hidden="true"
           onAnimationEnd={(event) => {
             if (event.target === event.currentTarget) complete();

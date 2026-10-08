@@ -1,67 +1,72 @@
 # FORMA V2: finale zoom-through exit
 
-Spec written and implemented 2026-10-08. Read [V2-SCROLL-DEMO.md](V2-SCROLL-DEMO.md) first, especially its **Copy** section: the finale layout described there is already built and is the starting point for this work.
+Spec written and implemented 2026-10-08; round 2 is folded into this document. Read [V2-SCROLL-DEMO.md](V2-SCROLL-DEMO.md) first, especially its **Copy** section.
 
 ## Background
 
-The last angle (4, Front) ends on a large two-line headline, "MADE TO / BE SEEN". It is rendered **before the canvas**, so the 3D frame lies across it. Around it sit an eyebrow, an italic *The Ellis* aside, a bottom-left spec line and a round warm-coloured CTA. Today, scrolling forward on the last angle does nothing: `createScrollSteps` clamps to the last angle.
+The last angle (4, Front) ends on the two-line headline "MADE TO / BE SEEN", rendered before the canvas so the frame lies across it. Its eyebrow, italic *The Ellis* aside, bottom spec line and round warm CTA are already laid out. The reference remains [the 7-second hero-slider recording](e9c2d2ccb882e4436fc80b681f3b4412.mp4).
 
-The layout and this exit are modelled on a 7-second hero-slider recording, `doc/feature/e9c2d2ccb882e4436fc80b681f3b4412.mp4`. In it, each slide hands off to the next in four beats:
-
-1. **Hold** about 0.6 s.
-2. **Zoom.** The headline scales up enormously, accelerating, until a single letter fills the screen. The background photo stays still.
-3. **Dark.** The screen fades to near-black for about 0.3 s.
-4. **Focus in.** The next slide appears blurred and sharpens over about 0.5 s.
-
-In the video the headline sits *above* the photo. Ours sits *behind* the glasses. That is intentional and works in our favour. The letters and the frame are the same ink black, so as the headline grows behind the frame, the glasses sink into the ink and the screen floods black. That replaces the video's fade to dark.
+The owner's round-2 review replaces the headline-only zoom with a camera move into the design: the glasses and copy grow together toward the nose gap. The shot ends on paper and reveals the destination. The move is a reversible, scrubbable sixth timeline position until it lands on 5.
 
 ## The behaviour
 
-One more forward gesture on the last angle plays the exit, and the app lands on its next page:
-
 | Where the demo runs | Destination |
 |---|---|
-| `/v2-demo` route (server up, `V2Demo`) | The home page `/`, inside the normal `Shell` with header and footer |
-| Offline full-screen demo (`OfflineV2Demo`, server unreachable) | The store-unavailable screen that `72595d5` replaced with the demo, restored |
+| `/v2-demo` route (server up, `V2Demo`) | Home `/`, inside the normal `Shell` with header and footer |
+| Offline full-screen demo (`OfflineV2Demo`, server unreachable) | Restored `StoreUnavailable` |
 
-The exit is **one-way and played, not scrubbed**. You can't be half-way into a different page, so the gesture only triggers it. Nothing returns from the destination to the demo. Browser Back on the online route simply remounts `/v2-demo` at angle 0.
+Nothing returns from the destination to the demo. Browser Back online remounts `/v2-demo` at angle 0. Normal navigation to home does not reveal.
 
-### Sequence
+## The zoom target
 
-Times are from the moment the exit starts. Use one GSAP timeline in the demo for phases 1–2, and a short CSS animation on the destination for phase 3.
+The owner marked the target on the Front angle: the **nose gap**, on the frame's centre line, just below the bridge, between the lenses. At 1920 × 945 it projects about **9px above the stage centre**, in the paper gap between "MADE TO" and "BE SEEN".
 
-| Phase | Time | What happens |
-|---|---|---|
-| 1. Zoom | 0 → 0.9 s | The headline `h2` (both lines together) scales 1 → `EXIT_SCALE` (40) with `ease: "power3.in"`, around the **zoom origin** below. The eyebrow, aside, spec line and CTA fade 1 → 0 over 0.3 → 0.7 s. The canvas fades 1 → 0 over 0.45 → 0.9 s, so the white lenses don't float on the ink. An **ink layer** (full-stage, `background: var(--ink)`, above everything in the stage) fades 0 → 1 over 0.6 → 0.9 s. It guarantees a fully black end state whatever the glyph coverage. |
-| 2. Hold | 0.9 → 1.05 s | Fully ink. At 1.05 s, call `onExit()`. |
-| 3. Reveal | 0 → 0.6 s after the destination mounts | The destination starts under an opaque ink overlay. The overlay fades 1 → 0 while the destination content goes from `filter: blur(EXIT_BLUR_PX)` (12px) to `blur(0)`. Use `ease-out` (for example `cubic-bezier(0.2, 0.7, 0.2, 1)`). |
+Define it as a model-space point **P** on the front-face plane (`ellis.ts` puts the front face on z = 0). Unproject the screen point (stage centre x, stage centre y − 1 cqmin) onto that plane at the landed Front pose. Recompute P on resize, along with the poses. Check in a screenshot that P lands in the nose gap, clear of the bridge and both rims, at 1920 × 945 and 375 × 812.
 
-The total is about 1.65 s. Put the constants with the other tuning constants in `src/tryon/scroll-steps.ts`: `EXIT_ZOOM_S = 0.9`, `EXIT_HOLD_S = 0.15`, `EXIT_REVEAL_S = 0.6`, `EXIT_SCALE = 40`, `EXIT_BLUR_PX = 12`. Feed the reveal duration and blur to CSS through custom properties; don't duplicate the numbers.
+Zooming into P therefore means flying **through the nose gap**. The frame passes off the edges of the screen, the headline lines part above and below, and the shot ends on plain paper. That's why the end state is **paper, not ink**.
 
-**Zoom origin:** wrap the **E** of "MADE" in `<span className="finale-origin">`. At exit start, read its `getBoundingClientRect()` and set the `h2`'s `transform-origin` to `x = left + 0.07 × font-size` (inside the E's vertical stem) and `y = top + height / 2`, in the `h2`'s own coordinates. The `h2` is `inset: 0` in the stage, so these equal stage coordinates. Check in screenshots that by about 70% of the zoom the screen is mostly ink, and tune the 0.07 factor if the origin lands in a counter instead of the stem. The ink layer covers any gap, but the zoom should *look* like it flies into the letter.
+## The move: a dolly with a fixed view direction
 
-**Reduced motion:** no transform, blur or canvas zoom. The ink layer fades 0 → 1 in 0.2 s, then `onExit()`, then the destination's ink overlay fades 1 → 0 in 0.2 s with no blur.
+- **Camera:** translate the camera from its landed Front position toward P. **Keep its orientation fixed; don't re-aim at P.** Moving along the line toward a point keeps that point's projection still (the focus of expansion), so P stays exactly on the owner's mark for the whole move.
+- **Distance:** progress `u ∈ [0, 1]` sets the camera's view-space depth to the front plane as `d(u) = d0 · EXIT_SCALE^(−u)`, with `EXIT_SCALE = 40`. Scale grows as `EXIT_SCALE^u`, a constant perceived zoom rate. A linear dolly would crawl and then lurch.
+- **Type and copy move with the camera.** Treat the finale's DOM copy (headline, eyebrow, *The Ellis* aside) as lying on the front-face plane. Apply one CSS transform to that layer: `scale(d0 / d(u))` with `transform-origin` at P's projected screen point. It then grows exactly like the front of the frame. The temples sit behind that plane, so they get natural depth parallax. Don't animate individual letters.
+- **Chrome stays put and fades:** the bottom-left spec line, the round CTA and (online) the `.site-header` fade 1 → 0 over `u ∈ [0, 0.25]`. Only the scene zooms.
+- **End state:** a **paper layer** (`background: var(--paper)`, full stage, above the canvas and copy) fades 0 → 1 over `u ∈ [0.85, 1]`. It hides any leftover rim or gradient edge and guarantees a clean paper frame. Replace round 1's ink layer with it.
+- **Near plane:** the studio camera is `PerspectiveCamera(30, …, 0.1, 1000)`. The authored Ellis model uses metres (`mm(n) = n × 0.001`), but the existing studio scales it ×100 and operates in **centimetres**. Apply the following rule in the actual camera units, preserving that contract. Desktop Front depth is about 0.421 m and ends about 10.5 mm away; unchanged portrait fit starts about 0.960 m away and ends about 24 mm away.
+  - During the exit, set `near = min(0.1, d(u) / 4)` and `far = near × 1e4`, so depth precision stays usable instead of a 1:400,000 range.
+  - Call `updateProjectionMatrix()`, and restore 0.1 / 1000 exactly at `u = 0`.
+  - Check the frame never shows a clipped cross-section as it leaves the screen.
+- **Rendering stays on demand:** each pose update renders one frame, with no loop. The background studio gradient is CSS and stays still.
 
-### Trigger rules (`src/tryon/scroll-steps.ts`)
+## Timeline, steps and commit
 
-Add a command `{ type: "exit" }` to `StepCommand`. Emit it only when the machine is **landed on the last angle**, not in flight, with no target queued, and the input is a fresh **forward** intent:
+The exit becomes a **sixth position** on the existing paused timeline. Integer 5 means "fully zoomed", and the segment `[4, 5]` is the exit.
 
-- **Keys:** `ArrowDown`, `PageDown`, `Space` (without Shift). Ignore auto-repeat: add `repeat?: boolean` to the key event and pass `KeyboardEvent.repeat` from the page. Holding ArrowDown sweeps to the last angle and stops there. **`End` never exits**; it only jumps to the last angle. `Home` and backward keys behave as today.
-- **Wheel:** a forward notch or fast flick that would step if there were a next angle. **Inertia guard:** forward wheel events from the gesture that *landed* on the last angle must not exit. Exit needs a new gesture, after at least `GESTURE_IDLE_MS` of idle since landing. Trackpad momentum must never throw the user out of the demo.
-- **Touch:** dragging forward on the last angle must not scrub; there is no partial exit. On release, exit if the forward travel or flick passes the same threshold that would step to a neighbour.
-- **Reduced motion:** the same rules; it still emits `exit`, and the page plays the reduced version.
-- After emitting `exit`, the machine is **exited**: every later event returns `[]`.
+- **Pose:** add an `exit` scalar (0–1), like `explode` and `blueprint`. The timeline tweens it 0 → 1 across `[4, 5]` with `ease: "none"`; the driver supplies the ramps. Time 4 is exactly today's Front pose, so reversing restores it exactly.
+- **Budget:** the segment's seconds are a fixed `EXIT_S = 1.6`, appended to the budget's seconds. It isn't a pose-table row, so it gets no projected-motion budget. Scrub weighting (`SCRUB_PX_PER_S`) then works as on other steps.
+- **Step machine** (`scroll-steps.ts`): keep round 1's `exit` guard work, but the exit is now a *step to 5*, not a command that plays a separate animation.
+  - A fresh forward notch, flick, ArrowDown, PageDown or Space on Front animates 4 → 5. Slow wheel and touch drag **scrub** within `[4, 5]`, and idle or release settles back to 4 on an early slow release, reversal or cancellation, and on to 5 after halfway with forward intent. A forward touch flick (40 px within 100 ms) plays the remaining step even before halfway. The existing settle behavior on angles 0–4 is unchanged.
+  - **Keep the guards:** the inertia guard (crossing from 4 into the exit needs a new gesture, at least `GESTURE_IDLE_MS` after landing on 4) and ignoring key `repeat`.
+  - `End` and every jump stop at 4 and never target 5. `Home` from inside `(4, 5)` returns to 0 as usual.
+  - Reduced motion cuts to 5.
+- **Commit:** landing on **5** is the point of no return. Hold paper for `EXIT_HOLD_S` (0.15 s), then call `onExit()`. From landing on 5, the machine is exited and every event returns `[]`. Anything short of 5 is fully reversible.
+- **Copy visibility:** the finale copy must stay visible throughout `[4, 5]`, including while `data-moving` is set. Today's rule hides all copy during motion; exempt the exit segment (for example with a `data-exit` attribute on the stage while `time > 4`).
+- **Header fade:** `headerOpacity` must not fight the chrome fade above.
+
+## Destination reveal
+
+Keep round 1's `ExitReveal` and `StoreUnavailable` wiring. Change the overlay from **ink to paper**, so the destination starts under opaque paper that fades 1 → 0 while the content goes from `blur(EXIT_BLUR_PX)` to sharp over `EXIT_REVEAL_S`. Reduced motion: a paper fade only.
 
 ### Page wiring (`src/pages/v2-demo.tsx`)
 
-- `V2Demo` and `OfflineV2Demo` take an `onExit: () => void` prop and pass it to the stage component.
-- When `execute` receives `exit`:
-  - Stop any animation.
-  - Set `data-exiting` on the stage, and keep `data-angle="4"` without `data-moving`, so the finale copy stays visible.
-  - Play the exit timeline and call `onExit` at the end of phase 2.
-  - Kill the timeline on unmount.
-- While exiting, ignore all input. The Observer can stay attached until unmount; its events just produce `[]`.
-- Unmounting the demo must leave the destination usable. `html`/`body` `overflow: hidden` must be reverted (today's `media.revert()` cleanup should do it; verify). On the online route, the `.site-header` that `headerOpacity` drives with `autoAlpha` must end fully visible on the home page.
+- Both demo exports take `onExit: () => void` and pass it to the stage.
+- Append `pose.exit` across [4, 5] to the same paused timeline and append only the fixed exit seconds to the page's budget. There is no separate `playExit` animation or `exit` command.
+- Resolve P against the reference model's transformed front plane on load and resize. Keep its projection in stage pixels as the whole finale copy layer's transform origin. The viewer applies the dolly during pose updates and restores its usual orbit and 0.1 / 1000 near/far at zero.
+- Keep the finale copy visible with `data-exit` during exit motion. Drive its scale, stationary chrome fade and paper opacity from the same scalar. The header uses the chrome fade instead of `headerOpacity` while u > 0.
+- Landing on 5 sets `data-exiting`, holds paper for 0.15 s, then calls `onExit`. Kill the delayed callback on unmount. All later machine events return [].
+- Unmount restores html/body overflow through `media.revert()` and explicitly clears the surviving online header's inline opacity/visibility. The destination must scroll normally.
+
+**Reduced motion:** cut directly to 5, hold paper for 0.15 s, then use a 0.2 s opacity-only destination paper fade. No intermediate dolly, DOM scaling or blur. Constants live in `scroll-steps.ts`: `EXIT_S = 1.6`, `EXIT_HOLD_S = 0.15`, `EXIT_REVEAL_S = 0.6`, `EXIT_REDUCED_S = 0.2`, `EXIT_SCALE = 40`, `EXIT_BLUR_PX = 12`. Reveal CSS receives the constants through custom properties.
 
 ### Destination wiring (`src/App.tsx`)
 
@@ -77,59 +82,61 @@ Add a command `{ type: "exit" }` to `StepCommand`. Emit it only when the machine
 
 ## Tests
 
-Extend the existing suites; don't loosen anything.
+- **Step machine** (`tests/scroll-steps.test.mjs`): rework round 1's exit tests for the step model:
+  - a forward step on 4 gives `animateTo 5`, and a scrub gives `scrubTo` within `(4, 5)`;
+  - the inertia guard and the `repeat` guard still hold;
+  - End and jumps never reach 5, and Home inside the segment returns to 0;
+  - reduced mode gives `cutTo 5`;
+  - after landing on 5, every event returns `[]`;
+  - settling from a partial scrub goes back to 4 or on to 5 under the exit settle rule above.
+- **Timeline:** `exit` is 0 at time 4 and 1 at time 5, forwards and backwards and after a resize rebuild, and it is monotonic in between. All existing integer-state, fit, projection-guard and budget tests for angles 0–4 pass unchanged; keep the exit segment out of them.
+- **Dolly maths:** a pure test that P's projection stays within 0.5px of its landed position across `u`. It also checks that the projected scale of points on the front plane around P matches the DOM scale `d0 / d(u)` within 1%.
+- **E2E:** keep round 1's online, offline and reduced-motion exit cases. Add a scrub case: drag partway into the exit, release early, and assert the stage settles back on 4 with the finale copy visible.
 
-- **Step machine** (`tests/scroll-steps.test.mjs`, where the gesture tests live). Add cases for:
-  - `exit` from the last angle on ArrowDown, PageDown, Space, a forward wheel notch, a forward flick, and a touch release past the threshold;
-  - no `exit` on End, Home, backward input, any angle other than the last, a step in flight toward the last angle, or a queued target;
-  - the inertia guard: wheel events less than `GESTURE_IDLE_MS` apart that span the landing don't exit, and idle followed by a new notch does;
-  - key `repeat: true` doesn't exit;
-  - reduced mode emits `exit`;
-  - after `exit`, every event returns `[]`.
-- **Existing motion, fit, projection-guard, budget, timeline and lighting tests** must pass unchanged.
-- **E2E** (`e2e/v2-scroll.spec.ts`):
-  - Online: End → landed on 4 → ArrowDown → URL is `/`, the home page and header are visible, the page scrolls, and no `filter` remains on the reveal wrapper after about 1 s.
-  - Offline: keep **"server down shows only the V2 scroll, without the shell"** as is; it asserts the error text is absent before any exit. Add a sibling case: with `**/api/**` returning 502, End → landed on 4 → ArrowDown → the "We couldn’t open the store" heading is visible and focused, and Try again is reachable.
-  - Reduced motion (`page.emulateMedia({ reducedMotion: "reduce" })`): the exit completes in under 0.6 s.
 
-  Run with `npm run test:e2e` if `../server` exists; otherwise say it wasn't run.
+Destination E2E cases still check the online home/header and scrolling, cleared navigation state and no replay on refresh/Back; offline StoreUnavailable focus and keyboard retry; and reduced motion under 0.6 s. The existing server-down demo case remains unchanged. Run `npm run test:e2e` only if `../server` exists.
 
 ## Constraints
 
 - No new dependencies; use the installed GSAP.
-- Don't change the angle table, camera paths, lighting, timing budget or their tests, or any of the per-angle copy layout, except for wrapping the E in `finale-origin`.
+- Don't change the angle table, camera paths, lighting, timing budget or their tests, or any of the per-angle copy layout, including the finale layout. The plain "Made to" text is restored; the exit transforms its existing parent layer.
 - Don't touch the server, `tests/fixtures/round4`, or shop pages beyond what the reveal wrapper needs in `App.tsx` and `Shell`.
 - Rendering stays on demand; the exit must not start a continuous render loop.
 - Update `V2-SCROLL-DEMO.md`: the input list under **What it does**, the finale row and a short "Exit" paragraph in **Copy**, and **Files**. Update the README's `/v2-demo` paragraph with one sentence about the exit.
 
 ## Done when
 
-- `npm run typecheck`, `npm test` and `npm run build` pass. `npm run test:e2e` passes, or it's reported as not run.
-- On the offline demo (`npm run dev` without the server), at 1920 × 945 and 375 × 812:
-  - one more scroll, ArrowDown or swipe on the Front angle plays the zoom. The headline accelerates toward the viewer from inside the E, the glasses sink into the ink, and the screen goes fully black;
-  - the store-unavailable screen focuses in from blur, and Try again is reachable by keyboard;
-  - trackpad momentum that lands on the Front angle doesn't trigger the exit; a deliberate new scroll does;
-  - End lands on Front without exiting;
-  - reduced motion does a quick ink fade with no zoom or blur.
-- On `/v2-demo` with the server, the same exit lands on `/` with the header visible, the page scrolling normally, and no replay on refresh or Back.
-- Screenshots of the zoom at about 30%, 60% and 90%, and of the destination mid-reveal, are attached to the report.
+- `npm run typecheck`, `npm test` and `npm run build` pass. Run `npm run test:e2e` only if `../server` exists; otherwise report it wasn't run.
+- On the offline demo at 1920 × 945 and 375 × 812:
+  - one notch on Front reads as the **camera flying into the design**, through the nose gap at the marked point, with the glasses and type growing together;
+  - a slow drag scrubs it both ways, and releasing early returns to Front;
+  - the shot ends on paper, and the store-unavailable screen focuses in from blur;
+  - momentum, End and reduced motion behave as above.
+- Attach screenshots at `u` = 0.25, 0.5, 0.75 and 1 and of the destination mid-reveal, replacing round 1's set in `doc/feature/screenshots/v2-finale-exit/`.
 
 ## Implementation verification
 
-Implemented on `task/forma-v2-lighting`. The initial copy/font/spec/reference working tree was committed separately as `2626223` before implementation.
+Implemented on `task/forma-v2-lighting`. The initial copy/font/spec/reference working tree was committed separately as `2626223`. Round 2 removes the headline-only timeline, E wrapper, ink layer and `EXIT_ZOOM_S`; P uses exactly centre minus 1 cqmin, with no tuning factor.
 
-- All trigger rules are enforced by `createScrollSteps`, including a settled-state check (merely scrubbing back to exact Front time is insufficient), idle after landing, consumed momentum, forward touch release, key repeat and the terminal exited state.
-- One GSAP exit timeline controls the headline, surrounding copy, canvas and ink, with unmount cleanup. The ink layer also covers the floating online header during the hold. The 0.07 origin factor is unchanged: desktop and mobile captures place the origin in the E's vertical stem.
-- `ExitReveal` is shared by both destinations. Its animation class and ink overlay are removed on completion; computed filter and transform are `none`, and will-change is `auto`. It focuses the main heading with `tabIndex=-1`.
-- The global reduced-motion CSS disables all animations with `!important`. The reduced reveal explicitly overrides that rule for the specified 0.2 s opacity-only ink fade; content stays unblurred. Measured total exit/reveal: about 0.42 s after the on-demand Front frame renders. The E2E timing case waits for that frame so software WebGL time from the preceding angle cut is excluded.
-- Offline dev checks at both requested sizes confirm End stays on Front, momentum spanning its landing does not exit, a deliberate fresh notch does, and native mobile touch exits only on release. The destination heading receives focus; Tab reaches Try again; failed retry stays on StoreUnavailable. HTML/body overflow is restored.
-- With `../server` absent, `npm run test:e2e` was not run. Three E2E cases were added as specified. An additional browser smoke check with mocked API responses verifies the online route reaches `/`, clears its navigation state, restores the header, scrolls normally, leaves no filter/transform/will-change, does not replay on refresh and remounts angle 0 on Back.
-- `npm run typecheck`, `npm test` (95 passing tests) and `npm run build` pass. Existing motion, fit, projection, budget, timeline and lighting tests are unchanged. No dependencies, server files or round4 fixtures changed.
-- No behavior or timing deviations from the spec. The in-app browser was unavailable; visual verification used installed local Chromium through Playwright.
+- `npm run typecheck`, `npm test` (95 passing tests), and `npm run build` pass. The existing angle table, camera paths, lighting, budget and fit/projection/timing test files are unchanged. Twelve exit step-machine cases and two isolated dolly/timeline tests cover the sixth position without adding it to the five-angle tests. No dependencies, server files or round4 fixtures changed.
+- `npm run test:e2e` was not run: `../server` is absent. The online/offline/reduced scaffolding remains, with an added real CDP touch early-release case.
+- Offline `npm run dev` checks in installed Chromium at both requested sizes show glasses and copy growing together, P clear of the bridge/rims, no clipped cross-sections, plain paper at u = 1, and a paper/blur destination reveal. An actual mobile touch drag reached u = 0.2463, reversed to 0.1539, then settled back to 4 with no transform and copy visible. A fresh mobile wheel notch completed the exit.
+- The destination heading receives focus, Tab reaches Try again, and a failed retry stays on StoreUnavailable. HTML overflow returns to its default, and computed reveal filter becomes `none`. Reduced motion completed the paper hold and reveal in about 0.354 s with no blur. The CSS fade overrides the site's global animation-disable rule only for the required reduced paper fade.
+- A server-free online smoke check with local API mocks reaches `/`, restores the header, focuses the home heading, clears route state and removes filter/transform/will-change. The home scrolls normally, refresh does not replay the reveal, and Back remounts angle 0. This does not replace the skipped server-backed E2E run.
+- R2's early-release wording conflicts with the old finish rule, which always selected the forward neighbour after even a short slow drag. The exit alone uses a halfway threshold, while keeping reverse/cancel behavior and fast flicks. Angles 0–4 retain their rule.
+- Unit clarification: the scene operates in centimetres, so the specified near/far formula uses those units and restores 0.1 / 1000 exactly at u = 0. No scene rescaling or portrait fit changes were made to force the approximate desktop 10 mm endpoint on mobile.
+- The in-app browser was unavailable; local Playwright Chromium supplied the offline visual checks. Screenshot controls and P markers exist only in the verification browser session.
 
-The zoom frames sample elapsed zoom time at 0.27, 0.54 and 0.81 s (30/60/90% of the 0.9 s zoom), with the running GSAP timeline paused at those times. Mid-reveal is 0.18 s into the destination's 0.6 s CSS animation. These controls exist only in the browser verification session.
+P below is in the reference model's authored millimetres, on local z = 0. A pure raycast through P hits no bridge, rim, lens or temple at either size. Its projection stays within 0.5 px across the move; points within 1 mm on the front plane scale within 1% of the DOM layer. Front's existing slight tilt is preserved.
 
-| Viewport | Zoom 30% | Zoom 60% | Zoom 90% | Destination mid-reveal |
+| Viewport | P (model mm) | Fixed screen point (px) | Front depth | Final depth |
 |---|---|---|---|---|
-| 1920 × 945 | [Capture](screenshots/v2-finale-exit/desktop-zoom-30.png) | [Capture](screenshots/v2-finale-exit/desktop-zoom-60.png) | [Capture](screenshots/v2-finale-exit/desktop-zoom-90.png) | [Capture](screenshots/v2-finale-exit/desktop-destination-mid-reveal.png) |
-| 375 × 812 | [Capture](screenshots/v2-finale-exit/mobile-zoom-30.png) | [Capture](screenshots/v2-finale-exit/mobile-zoom-60.png) | [Capture](screenshots/v2-finale-exit/mobile-zoom-90.png) | [Capture](screenshots/v2-finale-exit/mobile-destination-mid-reveal.png) |
+| 1920 × 945 | (0, −1.716121, 0) | (960, 463.05) | 421.446 mm | 10.536 mm |
+| 375 × 812 | (0, −1.597585, 0) | (187.5, 402.25) | 960.445 mm | 24.011 mm |
+
+Zoom captures seek the existing paused timeline to 4 + u. Destination captures pause its 0.6 s CSS animation at 0.3 s. Both endpoints are fully opaque paper.
+
+| Viewport | P mark | u = 0.25 | u = 0.5 | u = 0.75 | u = 1 | Destination mid-reveal |
+|---|---|---|---|---|---|---|
+| 1920 × 945 | [Capture](screenshots/v2-finale-exit/desktop-point-P.png) | [Capture](screenshots/v2-finale-exit/desktop-u-0.25.png) | [Capture](screenshots/v2-finale-exit/desktop-u-0.5.png) | [Capture](screenshots/v2-finale-exit/desktop-u-0.75.png) | [Capture](screenshots/v2-finale-exit/desktop-u-1.png) | [Capture](screenshots/v2-finale-exit/desktop-destination-mid-reveal.png) |
+| 375 × 812 | [Capture](screenshots/v2-finale-exit/mobile-point-P.png) | [Capture](screenshots/v2-finale-exit/mobile-u-0.25.png) | [Capture](screenshots/v2-finale-exit/mobile-u-0.5.png) | [Capture](screenshots/v2-finale-exit/mobile-u-0.75.png) | [Capture](screenshots/v2-finale-exit/mobile-u-1.png) | [Capture](screenshots/v2-finale-exit/mobile-destination-mid-reveal.png) |

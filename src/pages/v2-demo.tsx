@@ -25,13 +25,12 @@ import {
   createScrollSteps,
   acceptsStepInput,
   GESTURE_IDLE_MS,
-  EXIT_ZOOM_S,
   EXIT_HOLD_S,
   EXIT_SCALE,
-  EXIT_REDUCED_S,
   type StepCommand,
   type StepEvent,
 } from "@/tryon/scroll-steps";
+import { resolveExitDolly, withExitBudget, appendExitTimeline } from "@/tryon/scroll-exit";
 import type { Product } from "@/lib/types";
 import "./v2-demo.css";
 
@@ -276,7 +275,7 @@ function V2Stage({
       const root = document.documentElement;
       let themeTween: gsap.core.Tween | undefined;
       let reducedMotion = false;
-      let exitTimeline: gsap.core.Timeline | undefined;
+      let exitHold: gsap.core.Tween | undefined;
       const clearThemeOverrides = () => {
         for (const token of BLUEPRINT_TOKENS)
           root.style.removeProperty(`--blueprint-${token}`);
@@ -347,12 +346,12 @@ function V2Stage({
         const element = stage.current!;
         const last = SCROLL_ANGLES.length - 1;
         const computeBudget = () =>
-          buildMotionBudget(
+          withExitBudget(buildMotionBudget(
             poses(),
             viewer!.surfacePoints,
             viewer!.width,
             viewer!.height,
-          );
+          ));
         let budget = computeBudget();
         const seconds = [...budget.seconds];
         const steps = createScrollSteps(
@@ -361,6 +360,7 @@ function V2Stage({
           false,
           0,
           seconds,
+          true,
         );
         const pose = { ...poses()[0] };
         let animation: ReturnType<typeof animateScrollStep> | undefined;
@@ -370,8 +370,23 @@ function V2Stage({
           animation?.tween.kill();
           animation = undefined;
         };
+        let dolly = resolveExitDolly(poses()[last], viewer.width, viewer.height, viewer.frontPlane);
+        const installDolly = () => {
+          viewer!.setExitDolly(dolly);
+          const modelPoint = viewer!.modelPoint(dolly.point);
+          element.dataset.exitPoint = JSON.stringify(modelPoint.toArray());
+          element.style.setProperty("--exit-origin-x", dolly.origin.x + "px");
+          element.style.setProperty("--exit-origin-y", dolly.origin.y + "px");
+        };
+        installDolly();
         let timeline: gsap.core.Timeline;
         const update = () => {
+          const u = pose.exit;
+          if (u > 0) element.dataset.exit = String(u);
+          else element.removeAttribute("data-exit");
+          element.style.setProperty("--exit-scale", String(EXIT_SCALE ** u));
+          element.style.setProperty("--exit-chrome-opacity", String(Math.max(0, 1 - u / 0.25)));
+          element.style.setProperty("--exit-paper-opacity", String(Math.max(0, (u - 0.85) / 0.15)));
           element.dataset.explode = String(pose.explode);
           const { pool } = resolveLight(pose.light);
           element.style.setProperty("--pool-x", pool.x + "%");
@@ -383,11 +398,12 @@ function V2Stage({
           viewer!.setPose(pose);
           if (header)
             gsap.set(header, {
-              autoAlpha: headerOpacity(timeline.time(), last),
+              autoAlpha: u > 0 ? Math.max(0, 1 - u / 0.25) : headerOpacity(timeline.time(), last),
             });
         };
         timeline = gsap.timeline({ paused: true, onUpdate: update });
         populateScrollTimeline(timeline, pose, poses(), budget);
+        appendExitTimeline(timeline, pose, last);
         update();
         // The camera fits the frame to the shorter side; drawing text divides by this to stay px-sized.
         const scaleDrawing = () =>
@@ -399,13 +415,17 @@ function V2Stage({
         const land = (index: number) => {
           element.dataset.angle = String(index);
           element.removeAttribute("data-moving");
-          setAngle(index);
+          setAngle(Math.min(index, last));
           steps.handle({
             type: "landed",
             angle: index,
             at: performance.now(),
             time: timeline.time(),
           });
+          if (index === last + 1 && !exitHold) {
+            element.dataset.exiting = "true";
+            exitHold = gsap.delayedCall(EXIT_HOLD_S, () => exitCallback.current());
+          }
         };
         land(0);
         const startAnimation = (
@@ -427,14 +447,16 @@ function V2Stage({
           if (document.hidden) animation.pause();
         };
         refreshPose = () => {
-          if (exitTimeline) return;
           const time = timeline.time();
           const running = !!animation,
             velocity = animation?.velocity() ?? 0;
           stopAnimation();
+          dolly = resolveExitDolly(poses()[last], viewer!.width, viewer!.height, viewer!.frontPlane);
+          installDolly();
           budget = computeBudget();
           seconds.splice(0, seconds.length, ...budget.seconds);
           populateScrollTimeline(timeline, pose, poses(), budget);
+          appendExitTimeline(timeline, pose, last);
           timeline.time(time, false);
           update();
           scaleDrawing();
@@ -454,41 +476,11 @@ function V2Stage({
             gsap.set(document.documentElement, { overflow: "hidden" });
             gsap.set(document.body, { overflow: "hidden" });
             gsap.set(element, { touchAction: "none" });
-            const playExit = () => {
-              element.dataset.exiting = "true";
-              element.dataset.angle = String(last);
-              element.removeAttribute("data-moving");
-              themeTween?.kill();
-              const ink = element.querySelector(".v2-demo-ink");
-              exitTimeline = gsap.timeline();
-              if (reducedMotion) {
-                exitTimeline.to(ink, { opacity: 1, duration: EXIT_REDUCED_S, ease: "none" });
-                exitTimeline.call(() => exitCallback.current());
-                return;
-              }
-              const headline = element.querySelector<HTMLElement>(".v2-demo-finale h2")!;
-              const origin = element.querySelector<HTMLElement>(".finale-origin")!;
-              const glyph = origin.getBoundingClientRect();
-              const box = headline.getBoundingClientRect();
-              const fontSize = parseFloat(getComputedStyle(origin).fontSize);
-              gsap.set(headline, {
-                transformOrigin: `${glyph.left + 0.07 * fontSize - box.left}px ${glyph.top + glyph.height / 2 - box.top}px`,
-              });
-              exitTimeline
-                .to(headline, { scale: EXIT_SCALE, duration: EXIT_ZOOM_S, ease: "power3.in" }, 0)
-                .to(element.querySelectorAll(".v2-demo-finale .eyebrow, .finale-aside, .v2-demo-finale-foot"),
-                  { opacity: 0, duration: 0.4, ease: "none" }, 0.3)
-                .to(canvas.current, { opacity: 0, duration: EXIT_ZOOM_S - 0.45, ease: "none" }, 0.45)
-                .to(ink, { opacity: 1, duration: EXIT_ZOOM_S - 0.6, ease: "none" }, 0.6)
-                .call(() => exitCallback.current(), [], EXIT_ZOOM_S + EXIT_HOLD_S);
-            };
             const execute = (commands: StepCommand[]) => {
               for (const command of commands) {
                 const velocity = animation?.velocity() ?? 0;
                 stopAnimation();
-                if (command.type === "exit") {
-                  playExit();
-                } else if (command.type === "scrubTo") {
+                if (command.type === "scrubTo") {
                   element.dataset.moving = "true";
                   timeline.time(command.time, false);
                 } else {
@@ -619,7 +611,7 @@ function V2Stage({
         setReady(true);
         return () => {
           live = false;
-          exitTimeline?.kill();
+          exitHold?.kill();
           media.revert();
           // The header survives route navigation; discard the demo's inline fade.
           header?.style.removeProperty("opacity");
@@ -628,6 +620,8 @@ function V2Stage({
           refreshPose = () => {};
           timeline.kill();
           element.removeAttribute("data-exiting");
+          element.removeAttribute("data-exit");
+          element.removeAttribute("data-exit-point");
           element.removeAttribute("data-moving");
           element.removeAttribute("data-angle");
           element.removeAttribute("data-explode");
@@ -664,7 +658,7 @@ function V2Stage({
         <div className="v2-demo-copy v2-demo-finale" data-for-angle="4">
           <span className="eyebrow">FORMA Eyewear.</span>
           <h2>
-            <span>Mad<span className="finale-origin">e</span> to</span>
+            <span>Made to</span>
             <span>be seen</span>
           </h2>
           <div className="finale-aside">
@@ -740,7 +734,7 @@ function V2Stage({
           </div>
         </>
       )}
-      <div className="v2-demo-ink" aria-hidden="true" />
+      <div className="v2-demo-paper" aria-hidden="true" />
       <span className="v2-demo-announcement" aria-live="polite">
         {ready &&
           !unavailable &&

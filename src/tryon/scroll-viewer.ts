@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { applyExitDolly, exitFrontPlane, type ExitDolly } from "./scroll-exit";
 import { sampleFrameSurface } from "./screen-motion";
 import { createStudio } from "./studio";
 import { createExploder } from "./explode";
@@ -39,6 +40,8 @@ export function createScrollViewer({
   let blueprintTokens: BlueprintTokens | undefined;
   let surfacePoints: THREE.Vector3[] = [];
   const anchors = new Map<string, THREE.Vector3>();
+  let exitDolly: ExitDolly | undefined;
+  let frontModel: THREE.Object3D | undefined;
   const studio = createStudio(
     canvas,
     () => {
@@ -67,6 +70,13 @@ export function createScrollViewer({
     studio.camera.position.copy(target).add(offset.setFromSpherical(spherical));
     studio.camera.up.set(0, 1, 0);
     studio.camera.lookAt(target);
+    if (pose.exit > 0 && exitDolly) {
+      applyExitDolly(studio.camera, exitDolly, pose.exit);
+    } else if (studio.camera.near !== 0.1 || studio.camera.far !== 1000) {
+      studio.camera.near = 0.1;
+      studio.camera.far = 1000;
+      studio.camera.updateProjectionMatrix();
+    }
     studio.render((renderer) => {
       // Directional shadows depend on the model/light, not the viewing camera.
       renderer.shadowMap.autoUpdate = false;
@@ -134,6 +144,15 @@ export function createScrollViewer({
   }
 
   return {
+    get frontPlane() {
+      return exitFrontPlane(frontModel!);
+    },
+    modelPoint(point: THREE.Vector3) {
+      return frontModel!.worldToLocal(point.clone());
+    },
+    setExitDolly(value: ExitDolly) {
+      exitDolly = value;
+    },
     get surfacePoints() {
       return surfacePoints;
     },
@@ -164,6 +183,7 @@ export function createScrollViewer({
       renderRevision++;
       anchors.clear();
       object.updateWorldMatrix(true, true);
+      frontModel = object.getObjectByName("ellis.reference") ?? object;
       object.traverse((node) => {
         if (node.name)
           anchors.set(node.name, node.getWorldPosition(new THREE.Vector3()));
@@ -198,7 +218,7 @@ export function createScrollViewer({
       render();
     },
     setPose(
-      next: OrbitPose & { explode?: number; blueprint?: number; light?: number },
+      next: OrbitPose & { explode?: number; blueprint?: number; light?: number; exit?: number },
     ) {
       if (stopped) return;
       const light = next.light ?? 0;
@@ -237,6 +257,7 @@ export function createScrollViewer({
       if (
         !pose ||
         explode !== pose.explode ||
+        (next.exit ?? 0) !== pose.exit ||
         (
           ["targetX", "targetY", "targetZ", "theta", "phi", "distance"] as const
         ).some((key) => next[key] !== pose![key])
@@ -249,6 +270,7 @@ export function createScrollViewer({
         explode,
         light,
         blueprint: blueprintMix,
+        exit: THREE.MathUtils.clamp(next.exit ?? 0, 0, 1),
         phi: clampPhi(next.phi),
       };
       render();
