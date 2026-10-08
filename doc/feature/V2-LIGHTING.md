@@ -153,8 +153,119 @@ Environment rotation does not affect shadows, so it needs `renderRevision++` but
   - no step takes longer than before;
   - the shop product viewer at `/shop/...` looks unchanged.
 
-## Follow-ups (not this round)
+## Round 1 result
 
-- **Grounding shadow:** raise the floor `ShadowMaterial` opacity from 0.035 and soften it, so the frame stops floating.
-- **Tone mapping:** compare `NeutralToneMapping` with today's ACES at exposure 1.45 for truer blacks and colourways. This affects the blueprint composite's exposure uniform.
-- **Delete the unchosen environment variants** and the `?env` parameter once one is picked.
+Implemented in `90df437`, `380bf8b` and `51ada38`. Typecheck, 76 unit tests and the build pass.
+
+A visual review on 2026-10-08 compared the old studio with all three variants at every landed angle (headless Chromium, SwiftShader, 1280 × 720):
+- **`strip`:** the acetate goes from flat grey to deep glossy black, with crisp highlights on the rims and temples. A clear improvement.
+- **`window`:** similar to `strip`, softer.
+- **`soft`:** barely different from the old studio.
+- **Top / blueprint:** unchanged.
+
+Issues found:
+- **Hinge detail:** the 15° raking key throws long, faint floor-shadow streaks across the background. With pool strength 0.6, the surround reads grey and smudgy.
+- **Side, exploded:** the detached lenses reflect the dark room as grey patches. The old studio had the same patches, but they were fainter.
+- **Side's cool key colour** is barely visible.
+
+The environment variant hasn't been chosen yet; keep `?env` for now.
+
+# Round 2: grounding shadow and tone mapping
+
+Spec written 2026-10-08. This round covers the original ideas #4 and #6. Idea #5 (background agrees with the light) shipped in round 1 as the background pool.
+
+## 4. Grounding shadow
+
+Today the floor `ShadowMaterial` has opacity 0.035, which is invisible, so the frame floats above the paper. Make the shadow a visible, soft contact shadow, **in the v2 stage only**. The shop viewer shares `createStudio` and must not change.
+
+### Softness
+- `PCFSoftShadowMap` has been removed in the installed three (0.186); it now warns and falls back to `PCFShadowMap`.
+- Read `node_modules/three/src/renderers/webgl/WebGLShadowMap.js` and the `shadowmap_pars_fragment` chunk to find which of these actually softens a directional shadow in this version:
+  - `PCFShadowMap` with `shadow.radius`;
+  - `VSMShadowMap` with `radius` / `blurSamples`.
+- **Prefer `PCFShadowMap` + `radius`** if it works.
+  - VSM requires the receiver in the shadow pass and is prone to light bleeding; use it only if PCF cannot soften. Report which one you used and why.
+- The shadow-map type is renderer-wide. Pass it as an optional `createStudio` argument (default `PCFShadowMap`, as today), like the environment builder.
+
+### Opacity per angle
+Add `shadow` (floor opacity) to each row's `light` block and blend it in `resolveLight` like the other scalars. `createStudio` returns `floor` alongside `key` and `hemisphere`; the scroll viewer sets `floor.material.opacity`.
+
+An opacity change re-renders (`renderRevision++`), but it does **not** set `shadowDirty`: the shadow map is unchanged, only how strongly the floor shows it.
+
+Starting values; tune by eye:
+
+| # | Angle | `shadow` | Note |
+|---|---|---|---|
+| 0 | Three-quarter | 0.14 | Visible contact shadow under the frame |
+| 1 | Side, exploded | 0.12 | Each floating part casts its own shadow, which shows the separation |
+| 2 | Top / blueprint | 0.10 | Sits directly under the frame; the blueprint sheet covers it on landing |
+| 3 | Hinge detail | 0.05 | Low: the raking key would otherwise streak across the close-up |
+| 4 | Front | 0.14 | |
+
+### Hinge fixes from the round 1 review
+On the Hinge detail row only:
+- key elevation 15 → **25**;
+- pool strength 0.6 → **0.8**.
+
+Leave the other round 1 values alone.
+
+### Shadow camera
+Keep the ±23 shadow camera and `KEY_DISTANCE`.
+- If a softer `radius` shows edge artefacts or acne on the floor, adjust `shadow.bias` / `normalBias` or `mapSize`. Don't enlarge the frustum unless the shadow is clipped.
+- The hinge row is close up and the Top row looks straight down. Check that neither clips its shadow.
+
+## 6. Tone mapping
+
+Today the renderer uses `ACESFilmicToneMapping` at exposure 1.45. ACES flattens deep blacks and shifts hue, which matters for black acetate and for the other colourways.
+
+### Variants
+Add a dev query parameter, `?tone=aces|neutral|agx`, v2 only, read the same way as `?env`.
+
+| Variant | Tone mapping | Starting exposure |
+|---|---|---|
+| `aces` (default, unchanged) | `ACESFilmicToneMapping` | 1.45 |
+| `neutral` | `NeutralToneMapping` | 1.0 |
+| `agx` | `AgXToneMapping` | 1.0 |
+
+- Pass tone mapping and exposure into `createStudio` as an optional argument; the defaults are today's values.
+- The shop viewer and try-on (`engine.ts`) don't change.
+- The non-default exposures are starting points for a visual comparison afterwards. Don't tune them blind.
+
+### Blueprint composite (the trap)
+`blueprint-render.ts` **hard-codes `ACESFilmicToneMapping(...)`** in its cross-fade shader. If the renderer switches to Neutral or AgX and the shader doesn't, the studio image jumps in brightness and colour the moment a blueprint fade starts (mix > 0) and again when it ends.
+- Make the composite use the same operator as the renderer: a define, or the matching function from `tonemapping_pars_fragment`, chosen when the material is created or when tone mapping changes.
+- The composite already copies the renderer's exposure every draw; keep that.
+- Add a test: for each tone variant, the composite's operator matches `renderer.toneMapping`.
+
+### Constraints
+- `toneMappingExposure` stays constant during motion. It is set once per variant, never animated.
+- The existing tests that pin 1.45 must still pass with the default `aces`.
+
+## Round 2 tests
+
+- **Shadow opacity:** `resolveLight` blends `shadow`. A landed pose sets the floor opacity to the row value exactly. A shadow-only change re-renders without setting `shadowDirty`.
+- **Hinge row:** has elevation 25 and pool strength 0.8. The round 1 test that asserts landed rows must follow the table, not keep the old values.
+- **Shop viewer:** keeps opacity 0.035, `PCFShadowMap`, ACES and 1.45.
+- **Tone variants:** each `?tone` value sets the renderer's tone mapping and exposure; an unknown value falls back to `aces`. The blueprint composite's operator matches in each case.
+- **Unchanged:** the blueprint-fade render-count test (~viewer.test.mjs:1490), timing, the projection guard and the fit tests all pass as they are.
+- **E2E:** `npm run test:e2e` if `../server` exists; otherwise report it as not run.
+
+## Round 2 constraints
+
+- Same as round 1: no new dependencies; v2 only; no timing changes; rendering stays on demand; reduced motion cuts with the pose.
+- Don't delete any `?env` variant yet; the owner hasn't picked one.
+- Update `V2-SCROLL-DEMO.md`'s Lighting section with the `shadow` column, the shadow-map choice and the `?tone` parameter.
+
+## Round 2 done when
+
+- `npm run typecheck`, `npm test` and `npm run build` pass. E2E passes, or it's reported as not run.
+- On `/v2-demo` (owner or Claude review; no browser is needed in the implementation session):
+  - a soft, visible shadow sits under the frame at the Three-quarter and Front angles;
+  - each exploded part casts its own shadow at Side;
+  - Hinge has no streaks across the background;
+  - blueprint fades show no brightness jump under any `?tone`;
+  - the shop viewer is unchanged.
+
+## Later
+
+- Delete the unchosen `?env` and `?tone` variants and their parameters once the owner picks.
