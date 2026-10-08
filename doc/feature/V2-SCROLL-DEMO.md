@@ -1,6 +1,6 @@
 # FORMA V2: scroll-driven Ellis demo
 
-Status as of 2026-10-08. Open `/v2-demo` on the dev server (4175). If the store cannot reach the server, the app shows this demo full-screen instead of the startup error, with a built-in Ellis (`OFFLINE_ELLIS` in `src/pages/v2-demo.tsx`) and no header or footer. That means `npm run dev` alone, without the server, is enough to work on the motion.
+Status as of 2026-10-08 (copy added the same day; see [Copy](#copy)). Open `/v2-demo` on the dev server (4175). If the store cannot reach the server, the app shows this demo full-screen instead of the startup error, with a built-in Ellis (`OFFLINE_ELLIS` in `src/pages/v2-demo.tsx`) and no header or footer. That means `npm run dev` alone, without the server, is enough to work on the motion.
 
 ## What it does
 
@@ -63,6 +63,35 @@ Exposure stays constant through motion and fades. The blueprint composite calls 
 
 Round 3 locks in the strip environment and Neutral tone chosen in the Round 2 visual review, and lowers only Side's shadow opacity from 0.12 to 0.06. The round 1 and 2 results remain in `V2-LIGHTING.md` as history. Automated coverage verifies the single environment's build/disposal, landed/interpolated shadow opacity, opacity-only cache invalidation, unchanged shop defaults, fixed Neutral tone/exposure and the matching composite operator. Timing, fit, projection-guard and blueprint-fade render-count tests are unchanged.
 
+## Copy
+
+Added 2026-10-08. Each angle has its own text, laid out in `src/pages/v2-demo.tsx` and placed in `v2-demo.css`. A block carries `data-for-angle="n"` and is shown only while the stage is landed on that angle: `[data-angle="n"]` set and `data-moving` absent. It cuts out as soon as the camera moves and cuts back in on landing. There are no copy transitions yet; the finale's exit is specified in [V2-FINALE-EXIT.md](V2-FINALE-EXIT.md).
+
+| # | Angle | Copy | Placement (landscape) | Narrow screens |
+|---|---|---|---|---|
+| 0 | Three-quarter | `h1` "The Ellis" + one-line subtitle | Above the frame, left edge on the frame's left end (29.3% across) | ≤ 1:1: page gutter (24px), above the frame |
+| 1 | Side, exploded | `PARTS`: 01 Temples 140 mm, 02 Front 52–18, 03 Lenses 52 × 37 mm | Beside each part: temples left, front above, lenses right | ≤ 1:1: temples above, front and lenses side by side below |
+| 2 | Top / blueprint | Drafting sheet (`PlanDrawing`): view title, dimension lines (131 tip spread, 140 temple, 52·18·52 chain, 140 overall), leader notes A–C, title block | Title top-left, title block bottom-left, notes left of the frame with orthogonal leaders | ≤ 4:3: notes become a list under the title, chain and leaders hidden, title block top-right; phones (≤ 640px): title block under the drawing; short phones (≤ 700px tall): title row only |
+| 3 | Hinge detail | `DETAILS`: 01 Pinned front, 02 Hinge, 03 Hand polish | Equal steps rising beside the temple | ≤ 16:10: stacked bottom-right; ≤ 1:1: stacked at the bottom over a paper fade |
+| 4 | Front | Finale: eyebrow "FORMA Eyewear.", two-line headline "Made to / be seen", *The Ellis* aside, bottom-left spec line, round warm CTA | Headline split around the frame and rendered **before the canvas**, so the frame overlaps it; line 1 left-aligned to the frame's left end, line 2 right-aligned to its right end | ≤ 1:1: lines on the page gutters, aside under line 2 |
+
+Positioning:
+- The camera fits the frame to the shorter stage side, so the frame's on-screen size is a fixed fraction of `min(width, height)`. Angles 2–4 position copy in those units: `cqmin` inside a `container-type: size` wrapper (100cqmin = shorter side), offset from the stage centre.
+- The blueprint SVG uses `viewBox="-500 -500 1000 1000"` (1000 units = shorter side) with a `matrix(0.9823 0 0 0.9823 -888 -500)` group that maps pixel coordinates measured at 1808 × 1018. Strokes use `vector-effect: non-scaling-stroke`. Text divides its px size by `--drawing-scale` (`min(width, height) / 1000`, set by `scaleDrawing()` on load and in `refreshPose`), so labels stay a fixed px size.
+- All coordinates were measured by hand from the current camera rows. If a row's target, angle, distance or `VIEWER_FIT_MARGIN` changes, re-measure; the code marks this with a `ponytail:` comment. The robust upgrade is projecting model anchors each resize.
+
+Type:
+- Headings use Big Shoulders Display 600, self-hosted as `public/fonts/big-shoulders-display-600.woff2` (latin subset, SIL OFL, from Google Fonts), uppercase, with Arial fallback. Body text keeps the site's Arial.
+- Accents reuse existing tokens: `--warm` for the eyebrow, aside and CTA, `.serif` for the italic accent, and the `--blueprint-*` tokens for the drafting sheet, so the Blue theme recolours it.
+
+Content status:
+- All copy is placeholder.
+- Sizes on angles 1–2 come from the reference package's `design.json`, which labels itself "Photo-derived design estimates; not manufacturer measurements".
+- The quality claims on angle 3 must be replaced with real manufacturing facts before release.
+- The CTA is a link to `/product/the-ellis` only when `withLinks` is set (the online route); in the offline demo it is an inert circle.
+
+Verified by Playwright screenshots at 1920 × 945, 1808 × 1018, 1536 × 864, 1440 × 900, 1024 × 768, 1000 × 1000, 768 × 1024, 390 × 844, 375 × 812 and 375 × 667: no overlaps between copy blocks or with the dimension lines, nothing off-screen, and copy hidden during motion and on other angles. No automated test covers the copy yet.
+
 ## Timing history
 
 | Step | 97e1737 (fixed weights) | 9c9e566 (budget, slow) | 2026-10-08 retune | Round 1 handoff, desktop / phone | Effects during camera (current), desktop / phone |
@@ -82,7 +111,8 @@ No explode-start delay was needed. The fit test passes with the 0→1 explode sp
 
 ## Files
 
-- `src/pages/v2-demo.tsx`, `v2-demo.css`: stage, input wiring (GSAP Observer), header fade, theme swatches, offline fallback.
+- `src/pages/v2-demo.tsx`, `v2-demo.css`: stage, input wiring (GSAP Observer), header fade, theme swatches, offline fallback, per-angle copy and the blueprint drafting sheet.
+- `public/fonts/big-shoulders-display-600.woff2`: self-hosted heading font.
 - `src/tryon/scroll-poses.ts`: angle table and pose resolution.
 - `src/tryon/scroll-steps.ts`: gesture state machine and tuning constants.
 - `src/tryon/scroll-budget.ts`, `screen-motion.ts`: per-step phase seconds from projected screen motion.
@@ -90,6 +120,8 @@ No explode-start delay was needed. The fit test passes with the 0→1 explode sp
 - `src/tryon/scroll-animation.ts`: trapezoid driver, retarget velocity, pause/resume.
 - `src/tryon/scroll-viewer.ts`, `studio.ts`, `studio-environment.ts`, `explode.ts`, `blueprint*.ts`: renderer, procedural strip studio, on-demand frames, exploded fit, blueprint pass.
 - `doc/feature/V2-LIGHTING.md`: V2 lighting specification and history (rounds 1–3).
+- `doc/feature/V2-FINALE-EXIT.md`: specification for the finale's zoom-through exit to the landing page (not built yet).
+- `doc/feature/e9c2d2ccb882e4436fc80b681f3b4412.mp4`: motion reference for the finale layout and exit (7 s hero-slider recording).
 
 ## Verification
 

@@ -41,6 +41,135 @@ function headerOpacity(time: number, last: number) {
   );
 }
 
+// Exploded-angle callouts; sizes come from the reference model's design.json.
+const PARTS = [
+  { id: "temples", name: "Temples", size: "140 mm", line: "Tapered toward the tip for a light hold behind the ear." },
+  { id: "front", name: "Front", size: "52–18", line: "Lens width and bridge, cut square from one piece." },
+  { id: "lenses", name: "Lenses", size: "52 × 37 mm", line: "Clear and ready for your prescription." },
+];
+
+// Hinge close-up: quality notes rising along the temple. Placeholder claims.
+const DETAILS = [
+  { name: "Pinned front", line: "Each hinge is riveted through the acetate, not glued on." },
+  { name: "Hinge", line: "Built to open and close for years without loosening." },
+  { name: "Hand polish", line: "Buffed by hand to a deep, even gloss along the temple." },
+];
+
+// Blueprint angle: drafting sheet. Geometry is in px measured at 1808 × 1018
+// (centre 904, 509) and mapped onto a 1000-unit square fitted to the shorter
+// side, which is how the camera fits the frame. Sizes are design.json estimates.
+// ponytail: hand-measured coordinates; project model anchors if the Top view camera changes.
+const DRAWING_MAP = "matrix(0.9823 0 0 0.9823 -888 -500)";
+const NOTES = [
+  { key: "A", head: "Lens 1.2", line: "Centre thickness, 0.8 mm sag.", y: 560, rail: 585, to: [700, 758] },
+  { key: "B", head: "Wrap 4", line: "Front curves back toward the hinges.", y: 640, rail: 575, to: [616, 772] },
+  { key: "C", head: "Front depth 6", line: "Acetate thickness through the rim.", y: 720, rail: 565, to: [632, 786] },
+] as const;
+const SHEET = [
+  ["Model", "The Ellis"],
+  ["Material", "Acetate"],
+  ["Finish", "Ink black"],
+  ["Size", "52–18–140"],
+];
+
+function Dim({ x1, y1, x2, y2 }: { x1: number; y1: number; x2: number; y2: number }) {
+  const tick = (x: number, y: number) => `M${x - 4} ${y + 4}L${x + 4} ${y - 4}`;
+  return (
+    <>
+      <line className="bp-dim" x1={x1} y1={y1} x2={x2} y2={y2} />
+      <path className="bp-dim" d={tick(x1, y1) + tick(x2, y2)} />
+    </>
+  );
+}
+
+function Ext({ x1, y1, x2, y2 }: { x1: number; y1: number; x2: number; y2: number }) {
+  return <line className="bp-ext" x1={x1} y1={y1} x2={x2} y2={y2} />;
+}
+
+function PlanDrawing() {
+  return (
+    <div className="v2-demo-copy v2-demo-drawing" data-for-angle="2">
+      <div className="bp-head">
+        <h2>03 — Plan view</h2>
+        <p>Looking down on the frame. All dimensions in mm.</p>
+        <ol className="bp-list">
+          {NOTES.map((note) => (
+            <li key={note.key}>
+              <span>{note.key}</span>
+              {note.head}
+            </li>
+          ))}
+        </ol>
+      </div>
+      <svg
+        viewBox="-500 -500 1000 1000"
+        role="img"
+        aria-label="Plan view dimensions in millimetres: 131 between temple tips, 140 temple length, 52 lens, 18 bridge, 52 lens, 140 overall width."
+      >
+        <g transform={DRAWING_MAP}>
+          <Ext x1={640} y1={240} x2={640} y2={188} />
+          <Ext x1={1167} y1={240} x2={1167} y2={188} />
+          <Dim x1={640} y1={196} x2={1167} y2={196} />
+          <text className="bp-num" x={903} y={196} dy="-0.5em">131</text>
+
+          <Ext x1={1172} y1={249} x2={1268} y2={249} />
+          <Ext x1={1215} y1={745} x2={1268} y2={745} />
+          <Dim x1={1260} y1={249} x2={1260} y2={745} />
+          <g className="bp-wide">
+            <text className="bp-num" x={1276} y={497} dy="0.35em" textAnchor="start">140</text>
+            <text className="bp-cap" x={1276} y={497} dy="2.4em" textAnchor="start">TEMPLE</text>
+          </g>
+          <text className="bp-num bp-narrow" x={1260} y={497} dy="1.1em" transform="rotate(-90 1260 497)">140</text>
+
+          <g className="bp-wide">
+            {[653, 866, 940, 1153].map((x) => (
+              <Ext key={x} x1={x} y1={800} x2={x} y2={842} />
+            ))}
+            <Dim x1={653} y1={834} x2={866} y2={834} />
+            <Dim x1={866} y1={834} x2={940} y2={834} />
+            <Dim x1={940} y1={834} x2={1153} y2={834} />
+            <text className="bp-num" x={760} y={834} dy="-0.5em">52</text>
+            <text className="bp-num" x={903} y={834} dy="-0.5em">18</text>
+            <text className="bp-num" x={1046} y={834} dy="-0.5em">52</text>
+          </g>
+          <Ext x1={616} y1={800} x2={616} y2={892} />
+          <Ext x1={1191} y1={800} x2={1191} y2={892} />
+          <Dim x1={616} y1={884} x2={1191} y2={884} />
+          <text className="bp-num" x={903} y={884} dy="-0.5em">140</text>
+          <text className="bp-cap bp-wide" x={903} y={884} dy="2.2em">OVERALL WIDTH</text>
+
+          <g className="bp-wide">
+            {NOTES.map(({ key, head, line, y, rail, to: [tx, ty] }) => (
+              <g key={key}>
+                <circle className="bp-dim" cx={292} cy={y - 5} r={10} />
+                <text className="bp-cap" x={292} y={y - 5} dy="0.35em">{key}</text>
+                <text className="bp-head-text" x={312} y={y} textAnchor="start">{head.toUpperCase()}</text>
+                <text className="bp-note" x={312} y={y} dy="1.6em" textAnchor="start">{line}</text>
+                <polyline className="bp-dim" points={`560,${y - 5} ${rail},${y - 5} ${rail},${ty} ${tx},${ty}`} />
+                <circle className="bp-dot" cx={tx} cy={ty} r={2.5} />
+              </g>
+            ))}
+          </g>
+        </g>
+      </svg>
+      <div className="bp-sheet">
+        <div className="bp-sheet-title">
+          <strong>FORMA — The Ellis</strong>
+          <span>Sheet 3 / 5</span>
+        </div>
+        <dl>
+          {SHEET.map(([term, value]) => (
+            <div key={term}>
+              <dt>{term}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </div>
+  );
+}
+
 function blocked(target: EventTarget | null) {
   return (
     useApp.getState().panel !== null ||
@@ -250,6 +379,13 @@ function V2Stage({
         timeline = gsap.timeline({ paused: true, onUpdate: update });
         populateScrollTimeline(timeline, pose, poses(), budget);
         update();
+        // The camera fits the frame to the shorter side; drawing text divides by this to stay px-sized.
+        const scaleDrawing = () =>
+          element.style.setProperty(
+            "--drawing-scale",
+            String(Math.min(viewer!.width, viewer!.height) / 1000),
+          );
+        scaleDrawing();
         const land = (index: number) => {
           element.dataset.angle = String(index);
           element.removeAttribute("data-moving");
@@ -290,6 +426,7 @@ function V2Stage({
           populateScrollTimeline(timeline, pose, poses(), budget);
           timeline.time(time, false);
           update();
+          scaleDrawing();
           if (running) startAnimation(activeTarget, activeJump, velocity);
         };
 
@@ -372,7 +509,7 @@ function V2Stage({
               ignoreCheck: (event) =>
                 blocked(event.target) ||
                 (event.target instanceof Element &&
-                  !!event.target.closest(".v2-demo-theme")) ||
+                  !!event.target.closest(".v2-demo-theme, .finale-cta")) ||
                 ("touches" in event &&
                   (event as TouchEvent).touches.length > 1),
               onPress: () => {
@@ -475,12 +612,86 @@ function V2Stage({
     >
       <div className="v2-demo-studio" aria-hidden="true" />
       <div className="v2-demo-sheet" aria-hidden="true" />
+      {/* Front view: the headline sits behind the canvas so the frame overlaps it. */}
+      {ready && !unavailable && (
+        <div className="v2-demo-copy v2-demo-finale" data-for-angle="4">
+          <span className="eyebrow">FORMA Eyewear.</span>
+          <h2>
+            <span>Made to</span>
+            <span>be seen</span>
+          </h2>
+          <div className="finale-aside">
+            <em className="serif">The Ellis</em>
+            <p>
+              Ink black acetate
+              <br />
+              52–18–140
+            </p>
+          </div>
+        </div>
+      )}
       {product && !unavailable && (
         <canvas
           ref={canvas}
           role="img"
           aria-label={`3D view of The Ellis in Ink black, shown from ${SCROLL_ANGLES.length} angles as you scroll`}
         />
+      )}
+      {ready && !unavailable && (
+        <>
+          <div className="v2-demo-copy" data-for-angle="0">
+            <h1>The Ellis</h1>
+            <p className="muted">
+              Hand-polished Italian acetate, cut square and softened at every
+              edge.
+            </p>
+          </div>
+          {PARTS.map((part, index) => (
+            <div
+              key={part.id}
+              className="v2-demo-copy v2-demo-part"
+              data-for-angle="1"
+              data-part={part.id}
+            >
+              <h2>
+                0{index + 1} {part.name}
+              </h2>
+              <span>{part.size}</span>
+              <p className="muted">{part.line}</p>
+            </div>
+          ))}
+          <PlanDrawing />
+          <div className="v2-demo-copy v2-demo-steps" data-for-angle="3">
+            {DETAILS.map((detail, index) => (
+              <div key={detail.name} className="v2-demo-part">
+                <h2>
+                  0{index + 1} {detail.name}
+                </h2>
+                <p className="muted">{detail.line}</p>
+              </div>
+            ))}
+          </div>
+          <div className="v2-demo-copy v2-demo-finale-foot" data-for-angle="4">
+            <p>
+              <strong>Optical frame</strong>
+              <br />
+              Rectangle · Acetate · Ink black
+            </p>
+            {withLinks ? (
+              <Link
+                className="finale-cta"
+                to="/product/the-ellis"
+                aria-label="Shop The Ellis"
+              >
+                →
+              </Link>
+            ) : (
+              <span className="finale-cta" aria-hidden="true">
+                →
+              </span>
+            )}
+          </div>
+        </>
       )}
       <span className="v2-demo-announcement" aria-live="polite">
         {ready &&
