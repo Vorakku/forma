@@ -266,6 +266,60 @@ Add a dev query parameter, `?tone=aces|neutral|agx`, v2 only, read the same way 
   - blueprint fades show no brightness jump under any `?tone`;
   - the shop viewer is unchanged.
 
-## Later
+## Round 2 result
 
-- Delete the unchosen `?env` and `?tone` variants and their parameters once the owner picks.
+Implemented in `5b6868c`, `d10450d` and `4cb2d59`. Typecheck, 82 unit tests and the build pass. Softness uses `PCFShadowMap` with `shadow.radius = 4`; three 0.186's PCF path samples a Vogel disk scaled by `shadowRadius`.
+
+A visual review on 2026-10-08 used `?env=strip` with each `?tone` (headless Chromium, SwiftShader, 1280 × 720):
+- **Three-quarter and Front:** a soft, visible shadow now grounds the frame.
+- **Hinge:** the streaks are gone, and the background reads clean.
+- **Side, exploded:** the key is behind the parts, so their shadows fall forward toward the camera. At 0.12 they read as large grey ring-shaped smudges.
+- **`neutral`:** the truest black and crisp highlights; exposure 1.0 already looks right.
+- **`aces`:** slightly greyer blacks and highlights that clip a little.
+- **`agx`:** lifted, greyish blacks; wrong for black acetate.
+
+**Owner decision: `strip` environment, `neutral` tone.**
+
+# Round 3: lock in the choices
+
+Spec written 2026-10-08. This is a cleanup round: make the chosen variants permanent, delete the comparison code, and make one tuning change.
+
+## Changes
+
+### Environment (`studio-environment.ts`, `scroll-viewer.ts`)
+- Keep only the `strip` studio. `buildStudioEnvironment()` takes no argument and builds exactly what `strip` builds today: same shell, floor and panels with the same values.
+- Delete the `soft` and `window` variants, `StudioEnvironment`, `readStudioEnvironment` and the `?env` parameter.
+
+### Tone mapping (`studio-tone.ts`, `scroll-viewer.ts`, `blueprint-render.ts`)
+- The v2 stage always uses `NeutralToneMapping` at exposure **1.0**. Pass both to `createStudio` from the scroll viewer as plain options.
+- Delete `studio-tone.ts`, `readStudioTone` and the `?tone` parameter.
+- **Blueprint composite:** with one operator left, delete `studioToneOperator`, the `STUDIO_TONE_MAPPING` define and the per-draw recompile check. Call `NeutralToneMapping(...)` directly in the shader.
+  - Add a one-line comment that it must match the scroll viewer's renderer tone mapping.
+  - Keep a test that asserts the v2 renderer uses `NeutralToneMapping`, so the shader and renderer can't silently drift.
+  - The composite still copies the renderer's exposure every draw.
+- `createStudio`'s optional `toneMapping` / `toneMappingExposure` options stay. The shop viewer and try-on keep ACES at 1.45.
+
+### Side shadow (`scroll-poses.ts`)
+- Side three-quarter row: `shadow` 0.12 → **0.06**. No other row values change.
+
+## Round 3 tests
+
+- Delete the tests for `?env` / `?tone` selection and fallback, and for the deleted environment variants.
+- Keep the environment build/disposal test for the single `strip` scene (every geometry and material released after PMREM).
+- **v2 stage:** asserts `NeutralToneMapping` and exposure 1.0. Rewrite tests that pinned 1.45 **for the v2 stage** to the new values. Keep tests that pin 1.45 for the shop viewer as they are.
+- **Landed rows:** follow the table, including Side `shadow` 0.06.
+- **Unchanged:** the blueprint-fade render-count test, timing, the projection guard and the fit tests pass as they are.
+- **E2E:** `npm run test:e2e` if `../server` exists; otherwise report it as not run.
+
+## Round 3 constraints
+
+- Same as before: no new dependencies; v2 only; no timing changes; rendering stays on demand.
+- Shop viewer and try-on unchanged.
+- Net code should shrink. Don't add new abstractions while deleting the variants.
+- **Docs:** update `V2-SCROLL-DEMO.md`'s Lighting section to describe the final setup (strip studio, Neutral at 1.0, `shadow` column with Side 0.06) and remove the `?env` / `?tone` instructions. Leave the round 1 and 2 records in this file as history.
+
+## Round 3 done when
+
+- `npm run typecheck`, `npm test` and `npm run build` pass. E2E passes, or it's reported as not run.
+- `grep -rn "?env\|?tone\|readStudioTone\|readStudioEnvironment\|studio-tone" src tests` finds nothing.
+- `/v2-demo` with no query string looks like round 2's `?env=strip&tone=neutral`, except for a lighter shadow at Side.
