@@ -51,6 +51,7 @@ export function createScrollViewer({
     disposeBlueprint,
     () =>
       buildStudioEnvironment(readStudioEnvironment(window.location.search)),
+    { shadowMapType: THREE.PCFShadowMap, shadowRadius: 4 },
   );
   const keyPosition = new THREE.Vector3();
   const keyColor = new THREE.Color();
@@ -218,6 +219,7 @@ export function createScrollViewer({
         studio.hemisphere.intensity !== resolvedLight.hemisphere ||
         studio.scene.environmentIntensity !== resolvedLight.environment ||
         studio.scene.environmentRotation.y !== environmentYaw ||
+        studio.floor.material.opacity !== resolvedLight.shadow ||
         light !== pose?.light
       )
         renderRevision++;
@@ -227,6 +229,7 @@ export function createScrollViewer({
       studio.hemisphere.intensity = resolvedLight.hemisphere;
       studio.scene.environmentIntensity = resolvedLight.environment;
       studio.scene.environmentRotation.y = environmentYaw;
+      studio.floor.material.opacity = resolvedLight.shadow;
       const explode = next.explode ?? 0;
       if (explode !== lastExplode) shadowDirty = true;
       lastExplode = explode;

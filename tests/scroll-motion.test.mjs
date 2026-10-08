@@ -685,3 +685,17 @@ test("pose light is linear in every camera window forward and reverse, including
   }
   timeline.kill();
 });
+
+test("Round 2 shadow opacity resolves exactly on landing and blends linearly with the light scalar", () => {
+  const { resolveLight, SCROLL_ANGLES } = motion;
+  const expected = [0.14, 0.12, 0.10, 0.05, 0.14];
+  for (const [index, shadow] of expected.entries()) {
+    assert.equal(SCROLL_ANGLES[index].light.shadow, shadow);
+    assert.equal(resolveLight(index).shadow, shadow);
+    if (index === expected.length - 1) continue;
+    for (const fraction of [0.25, 0.5, 0.75]) {
+      const opacity = shadow + (expected[index + 1] - shadow) * fraction;
+      assert.equal(resolveLight(index + fraction).shadow, opacity);
+    }
+  }
+});

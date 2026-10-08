@@ -1786,3 +1786,86 @@ test("light-only changes invalidate blueprint images and moving keys refresh sha
   assert.equal(renderer.shadowMap.needsUpdate, false);
   viewer.dispose();
 });
+
+test("V2 shadows use each landed opacity, wider PCF filtering and the two Round 2 Hinge fixes", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const poses = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius);
+  for (const [index, pose] of poses.entries()) {
+    viewer.setPose({ ...pose, blueprint: 0 });
+    const renderer = h.renderers[0];
+    const key = renderer.scene.children.find((node) => node.isDirectionalLight);
+    assert.equal(renderer.scene.getObjectByName("floor").material.opacity, [0.14, 0.12, 0.10, 0.05, 0.14][index]);
+    assert.equal(renderer.shadowMap.type, THREE.PCFShadowMap);
+    assert.equal(key.shadow.radius, 4);
+    assert.deepEqual(key.shadow.mapSize.toArray(), [2048, 2048]);
+    assert.equal(key.shadow.bias, -0.001);
+    assert.equal(key.shadow.normalBias, 0.05);
+    assert.deepEqual([key.shadow.camera.left, key.shadow.camera.bottom, key.shadow.camera.right, key.shadow.camera.top], [-23, -23, 23, 23]);
+    assert.ok(Math.abs(key.position.length() - KEY_DISTANCE) < 1e-12);
+  }
+  assert.equal(SCROLL_ANGLES[3].light.key.elevation, 25);
+  assert.equal(SCROLL_ANGLES[3].light.pool.strength, 0.8);
+  assert.equal(h.callbacks.size, 0);
+  viewer.dispose();
+});
+
+test("shadow opacity alone invalidates the studio image without recomputing the shadow map", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const pose = { ...resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor)[0], blueprint: 0.5 };
+  viewer.setPose(pose);
+  const renderer = h.renderers[0];
+  // Capture the floor through the direct studio path before testing partial fades.
+  viewer.setPose({ ...pose, blueprint: 0 });
+  const studioFloor = renderer.scene.getObjectByName("floor");
+  const key = renderer.scene.children.find((node) => node.isDirectionalLight);
+  const keyPosition = key.position.clone();
+  viewer.setPose(pose);
+  const before = SCROLL_ANGLES[0].light.shadow;
+  try {
+    let renders = renderer.renders;
+    SCROLL_ANGLES[0].light.shadow = 0.16;
+    viewer.setPose(pose);
+    assert.equal(studioFloor.material.opacity, 0.16);
+    assert.ok(key.position.equals(keyPosition));
+    assert.equal(renderer.renders - renders, 3, "shadow opacity invalidates both cached images");
+    assert.equal(renderer.shadowMap.needsUpdate, false);
+    renders = renderer.renders;
+    viewer.setPose({ ...pose, blueprint: 0.6 });
+    assert.equal(renderer.renders - renders, 1, "unchanged opacity reuses the images");
+    assert.equal(renderer.shadowMap.needsUpdate, false);
+    h.doc.hidden = true;
+    SCROLL_ANGLES[0].light.shadow = 0.18;
+    renders = renderer.renders;
+    viewer.setPose(pose);
+    assert.equal(renderer.renders, renders);
+    h.doc.hidden = false;
+    h.event(h.doc, "visibilitychange");
+    assert.equal(renderer.renders - renders, 3, "hidden opacity change is visible on resuming");
+    assert.equal(studioFloor.material.opacity, 0.18);
+    assert.equal(renderer.shadowMap.needsUpdate, false);
+    assert.equal(h.callbacks.size, 0);
+  } finally {
+    SCROLL_ANGLES[0].light.shadow = before;
+    viewer.dispose();
+  }
+});
+
+test("shop ignores V2 environment and tone parameters and retains its original floor, shadow and exposure", () => {
+  const h = devices({ search: "?env=window&tone=agx" });
+  const viewer = h.start();
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  h.flush();
+  const renderer = h.renderers[0];
+  const key = renderer.scene.children.find((node) => node.isDirectionalLight);
+  assert.equal(h.environmentSources[0].scene.name, "RoomEnvironment");
+  assert.equal(renderer.scene.getObjectByName("floor").material.opacity, 0.035);
+  assert.equal(renderer.shadowMap.type, THREE.PCFShadowMap);
+  assert.equal(key.shadow.radius, 1);
+  assert.equal(renderer.toneMapping, THREE.ACESFilmicToneMapping);
+  assert.equal(renderer.toneMappingExposure, 1.45);
+  viewer.dispose();
+});
