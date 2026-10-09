@@ -29,23 +29,14 @@ import {
   acceptsStepInput,
   GESTURE_IDLE_MS,
   EXIT_HOLD_S,
-  EXIT_SCALE,
   type StepCommand,
   type StepEvent,
 } from "@/tryon/scroll-steps";
-import { resolveExitDolly, withExitBudget, appendExitTimeline } from "@/tryon/scroll-exit";
+import { resolveExitPath, exitSurface, withExitBudget, appendExitTimeline } from "@/tryon/scroll-exit";
 import type { Product } from "@/lib/types";
 import "./v2-demo.css";
 
 gsap.registerPlugin(Observer, useGSAP);
-
-function headerOpacity(time: number, last: number) {
-  return gsap.utils.clamp(
-    0,
-    1,
-    Math.max(1 - time / 0.4, 1 - (last - time) / 0.4),
-  );
-}
 
 // Exploded-angle callouts; sizes come from the reference model's design.json.
 const PARTS = [
@@ -439,23 +430,23 @@ function V2Stage({
           animation?.tween.kill();
           animation = undefined;
         };
-        let dolly = resolveExitDolly(poses()[last], viewer.width, viewer.height, viewer.frontPlane);
-        const installDolly = () => {
-          viewer!.setExitDolly(dolly);
-          const modelPoint = viewer!.modelPoint(dolly.point);
+        let exitPath = resolveExitPath(poses()[last], viewer.width, viewer.height, viewer.exitModel);
+        const installPath = () => {
+          viewer!.setExitPath(exitPath);
+          const modelPoint = viewer!.modelPoint(exitPath.point);
           element.dataset.exitPoint = JSON.stringify(modelPoint.toArray());
-          element.style.setProperty("--exit-origin-x", dolly.origin.x + "px");
-          element.style.setProperty("--exit-origin-y", dolly.origin.y + "px");
         };
-        installDolly();
+        installPath();
         let timeline: gsap.core.Timeline;
         const update = () => {
           const u = pose.exit;
           if (u > 0) element.dataset.exit = String(u);
           else element.removeAttribute("data-exit");
-          element.style.setProperty("--exit-scale", String(EXIT_SCALE ** u));
-          element.style.setProperty("--exit-chrome-opacity", String(Math.max(0, 1 - u / 0.25)));
-          element.style.setProperty("--exit-paper-opacity", String(Math.max(0, (u - 0.85) / 0.15)));
+          const surface = exitSurface(u);
+          element.style.setProperty("--exit-copy-opacity", String(surface.copyOpacity));
+          element.style.setProperty("--exit-copy-scale", String(surface.copyScale));
+          element.style.setProperty("--exit-chrome-opacity", String(surface.chromeOpacity));
+          element.style.setProperty("--exit-paper-opacity", String(surface.paperOpacity));
           element.dataset.explode = String(pose.explode);
           const { pool } = resolveLight(pose.light);
           element.style.setProperty("--pool-x", pool.x + "%");
@@ -466,9 +457,7 @@ function V2Stage({
           root.dataset.mode = pose.blueprint >= 0.5 ? "blueprint" : "studio";
           viewer!.setPose(pose);
           if (header)
-            gsap.set(header, {
-              autoAlpha: u > 0 ? Math.max(0, 1 - u / 0.25) : headerOpacity(timeline.time(), last),
-            });
+            header.style.setProperty("--v2-header-exit-opacity", String(Math.max(0, 1 - u / 0.25)));
         };
         timeline = gsap.timeline({ paused: true, onUpdate: update });
         populateScrollTimeline(timeline, pose, poses(), budget);
@@ -520,8 +509,8 @@ function V2Stage({
           const running = !!animation,
             velocity = animation?.velocity() ?? 0;
           stopAnimation();
-          dolly = resolveExitDolly(poses()[last], viewer!.width, viewer!.height, viewer!.frontPlane);
-          installDolly();
+          exitPath = resolveExitPath(poses()[last], viewer!.width, viewer!.height, viewer!.exitModel);
+          installPath();
           budget = computeBudget();
           seconds.splice(0, seconds.length, ...budget.seconds);
           populateScrollTimeline(timeline, pose, poses(), budget);
@@ -612,7 +601,7 @@ function V2Stage({
               ignoreCheck: (event) =>
                 blocked(event.target) ||
                 (event.target instanceof Element &&
-                  !!event.target.closest(".v2-demo-theme, .v2-demo-night-toggle, .finale-cta")) ||
+                  !!event.target.closest(".v2-demo-theme, .v2-demo-night-toggle")) ||
                 ("touches" in event &&
                   (event as TouchEvent).touches.length > 1),
               onPress: () => {
@@ -683,9 +672,8 @@ function V2Stage({
           live = false;
           exitHold?.kill();
           media.revert();
-          // The header survives route navigation; discard the demo's inline fade.
-          header?.style.removeProperty("opacity");
-          header?.style.removeProperty("visibility");
+          // The header survives route navigation; discard the demo's exit fade.
+          header?.style.removeProperty("--v2-header-exit-opacity");
           clearMode();
           refreshPose = () => {};
           timeline.kill();
@@ -789,19 +777,6 @@ function V2Stage({
               <br />
               Rectangle · Acetate · Ink black
             </p>
-            {withLinks ? (
-              <Link
-                className="finale-cta"
-                to="/product/the-ellis"
-                aria-label="Shop The Ellis"
-              >
-                →
-              </Link>
-            ) : (
-              <span className="finale-cta" aria-hidden="true">
-                →
-              </span>
-            )}
           </div>
         </>
       )}
