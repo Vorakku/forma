@@ -82,6 +82,37 @@
   pointer-events: none;
 }
 
+.v2-demo-stage[data-torch-pointer] {
+  cursor: none;
+}
+.v2-demo-torch {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  top: 0;
+  width: var(--torch-dot-size);
+  height: var(--torch-dot-size);
+  margin: calc(var(--torch-dot-size) / -2);
+  border-radius: 50%;
+  background: var(--torch-dot-color);
+  pointer-events: none;
+  will-change: transform;
+}
+.v2-demo-torch::before {
+  content: "";
+  position: absolute;
+  width: var(--torch-halo-size);
+  height: var(--torch-halo-size);
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--torch-dot-color) var(--torch-halo-opacity), transparent), transparent var(--torch-halo-stop));
+}
+.v2-demo-torch[hidden] {
+  display: none;
+}
+
 .v2-demo-state {
   position: absolute;
   inset: 0;

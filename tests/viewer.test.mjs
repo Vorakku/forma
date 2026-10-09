@@ -15,7 +15,7 @@ const output = resolve(".sites-runtime/viewer-tests.mjs");
 await build({
   stdin: {
     contents:
-      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-exit';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './screen-motion';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';export * from './studio-environment';export * from './v2-theme';",
+      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-exit';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './screen-motion';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';export * from './studio-environment';export * from './v2-theme';export * from './night-torch';",
     resolveDir: resolve("src/tryon"),
   },
   outfile: output,
@@ -77,6 +77,10 @@ const {
   readV2Theme,
   saveV2Theme,
   V2_THEME_KEY,
+  TORCH,
+  createTorchProjection,
+  createTorchSpring,
+  resolveLight,
 } = await import(pathToFileURL(output));
 after(() => rm(output, { force: true }));
 const product = (overrides = {}) => ({
@@ -2008,7 +2012,8 @@ test("wearer exit restores camera and existing glass in both themes, with one re
         "scrubbing never changes the glass shade or depth recipe");
     }
     assert.equal(renderer.renders - before, samples.length);
-    assert.equal(h.callbacks.size, 0, "exit never schedules a continuous render loop");
+    h.flush();
+    assert.equal(h.callbacks.size, 0, "the added night spring/fade stops after exit scrubbing");
     assert.deepEqual(renderer.camera.position.toArray(), parked.position.toArray());
     assert.ok(renderer.camera.quaternion.angleTo(parked.quaternion) < 1e-7);
     assert.deepEqual([renderer.camera.fov, renderer.camera.near, renderer.camera.far], [30, 0.1, 1000]);
@@ -2016,4 +2021,96 @@ test("wearer exit restores camera and existing glass in both themes, with one re
     assert.deepEqual(h.errors, []);
     viewer.dispose();
   }
+});
+
+test("torch unprojects centre and off-centre points onto the current camera-facing offset plane", () => {
+  const project = createTorchProjection();
+  const centre = new THREE.Vector3(2, 3, -1);
+  const camera = new THREE.PerspectiveCamera(30, 2, 0.1, 1000);
+  const out = new THREE.Vector3();
+  for (const cameraPosition of [new THREE.Vector3(2, 3, 19), new THREE.Vector3(22, 3, -1)]) {
+    camera.position.copy(cameraPosition);
+    camera.lookAt(centre);
+    const normal = cameraPosition.clone().sub(centre).normalize();
+    const expected = centre.clone().addScaledVector(normal, TORCH.planeOffset);
+    project(camera, centre, 0.5, 0.5, out);
+    assert.ok(out.distanceTo(expected) < 1e-10);
+    project(camera, centre, 0.75, 0.25, out);
+    assert.ok(Math.abs(out.clone().sub(expected).dot(normal)) < 1e-10);
+    const screen = out.clone().project(camera);
+    assert.ok(Math.abs(screen.x - 0.5) < 1e-10);
+    assert.ok(Math.abs(screen.y - 0.5) < 1e-10);
+  }
+});
+
+test("torch spring lags, settles exactly and reduced motion cuts directly", () => {
+  const spring = createTorchSpring();
+  assert.equal(spring.step(0.8, 0.2, 1 / 60, false), true);
+  assert.ok(spring.state.x > 0.5 && spring.state.x < 0.8);
+  let frames = 0;
+  while (spring.step(0.8, 0.2, 1 / 60, false) && frames++ < 300) {}
+  assert.ok(frames < 120);
+  assert.deepEqual(spring.state, { x: 0.8, y: 0.2, vx: 0, vy: 0 });
+  assert.equal(spring.step(0.1, 0.9, 1 / 60, true), false);
+  assert.deepEqual(spring.state, { x: 0.1, y: 0.9, vx: 0, vy: 0 });
+});
+
+test("torch fades to the night floor, stops rAF, and restores exact resolved lights for day/blueprint/exit/hidden", () => {
+  const h = devices();
+  const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+  viewer.setObject(buildDisplayGlasses(product(), 0));
+  const poses = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius);
+  viewer.setPose(poses[0]);
+  const renderer = h.renderers[0], scene = renderer.scene;
+  const key = scene.children.find(node => node.isDirectionalLight);
+  const hemi = scene.children.find(node => node.isHemisphereLight);
+  const torch = scene.getObjectByName("v2.night-torch");
+  const exact = index => {
+    const base = resolveLight(index);
+    assert.equal(key.intensity, base.key.intensity);
+    assert.equal(hemi.intensity, base.hemisphere);
+    assert.equal(scene.environmentIntensity, base.environment);
+    assert.equal(torch.intensity, 0);
+    assert.equal(torch.visible, false);
+  };
+  viewer.setTheme("night");
+  assert.equal(key.intensity, resolveLight(0).key.intensity, "activation starts at the original lighting");
+  h.flush();
+  assert.ok(Math.abs(key.intensity - resolveLight(0).key.intensity * TORCH.keyFloor) < 1e-12);
+  assert.ok(Math.abs(hemi.intensity - resolveLight(0).hemisphere * TORCH.hemisphereFloor) < 1e-12);
+  assert.ok(Math.abs(scene.environmentIntensity - resolveLight(0).environment * TORCH.environmentFloor) < 1e-12);
+  assert.equal(torch.castShadow, false);
+  assert.equal(renderer.shadowMap.needsUpdate, false, "torch ticks never dirty the key shadow");
+  assert.equal(h.callbacks.size, 0);
+  viewer.setTheme("day");
+  h.flush();
+  exact(0);
+  viewer.setTheme("night");
+  h.flush();
+  viewer.setPose(poses[2]);
+  h.flush();
+  exact(2);
+  viewer.setPose(poses[4]);
+  h.flush();
+  viewer.setPose({ ...poses[4], exit: 0.01 });
+  h.flush();
+  exact(4);
+  viewer.setPose(poses[4]);
+  h.flush();
+  h.doc.hidden = true;
+  h.doc.dispatchEvent(new Event("visibilitychange"));
+  exact(4);
+  assert.equal(h.callbacks.size, 0);
+  h.doc.hidden = false;
+  h.doc.dispatchEvent(new Event("visibilitychange"));
+  h.flush();
+  viewer.setPose({ ...poses[0], light: 0.4 });
+  h.flush();
+  viewer.setTheme("day");
+  h.flush();
+  exact(0.4);
+  viewer.setTheme("night");
+  viewer.dispose();
+  assert.equal(h.callbacks.size, 0);
+  assert.equal(torch.parent, null);
 });

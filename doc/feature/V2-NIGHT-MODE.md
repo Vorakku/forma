@@ -146,7 +146,7 @@ This is here so Phase 1 doesn't block Phase 2.
 
 ## Implementation result
 
-Implemented Phase 1 on 2026-10-08, after backdrop commit `1b4fedf`. Phase 2 is not implemented. The 44px Moon/Sun control stays at right 24px / top 104px, hides on blueprint, ignores wheel/touch capture, persists `forma.v2.theme`, and crossfades the page and canvas with native View Transitions over 300ms. Reduced motion and unsupported browsers switch immediately. Transition/exit clicks are ignored, and unmount cancels a pending transition and removes the root theme.
+Implemented Phase 1 on 2026-10-08, after backdrop commit `1b4fedf`. Phase 2's result is recorded below. The 44px Moon/Sun control is now **bottom-left, inset 24px from the left and bottom with safe-area support**, per the navbar/button update below; the earlier right/top placement is obsolete. It hides on blueprint, ignores wheel/touch capture, persists `forma.v2.theme`, and crossfades the page and canvas with native View Transitions over 300ms. Reduced motion and unsupported browsers switch immediately. Transition/exit clicks are ignored, and unmount cancels a pending transition and removes the root theme.
 
 Final night tokens:
 
@@ -173,3 +173,44 @@ Only the pool tokens were tuned: paper is slightly darker to make the supplied m
 ## Navbar and button placement update — 2026-10-08
 
 The owner requested that the navbar fade out on entry and reveal when the mouse approaches the top, and that the day/night control move to the bottom-left. The toggle now uses a 24px bottom/left inset with safe-area support. The finale footer starts at 88px to clear the control. The mobile hinge copy has at least 88px of bottom padding so its final note clears the button. The owner also requested removing the last-angle arrow button; both its online link and offline decoration are removed. The earlier tablet navigation margin workaround is removed. The navbar reveal works at every angle and retains keyboard and touch access.
+
+## Implementation result (Phase 2)
+
+Implemented on 2026-10-09 on `task/v2-night-torch`, branched from main `357ba31`. This completes the torch outline; its original “don't build yet” wording belongs to the Phase 1 brief.
+
+**Light choice:** a shadowless **PointLight** added to the V2 studio scene by `src/tryon/night-torch.ts`. An omnidirectional source gives moving specular highlights on rims, bridge, rivets and exploded temples without a spotlight cone or target tracking. The low studio floor leaves unlit acetate near black. The light is invisible and has zero intensity when fully inactive, so it is excluded from day/blueprint shader lighting. The shared shop studio, environment, tone mapping, pose table and directional-shadow dirty logic are unchanged.
+
+**Projection and motion:** the screen target is unprojected onto a camera-facing plane through the assembled model's centre, offset toward the camera. Its normal and ray are recomputed from the current camera on every render, including scroll and resize renders after the spring has settled. The initial 4-unit offset was inside/behind the front rim and read too dim; the final 10-unit offset puts the source ahead of it. Screen-space spring coordinates are reprojected each frame so scroll cannot leave the light on an old camera plane. Vector, raycaster and plane scratch objects are reused.
+
+All tuning is grouped in the exported `TORCH` object at the top of **`src/tryon/night-torch.ts`**:
+
+| Constant | Final value |
+|---|---|
+| `dotSize` / `dotColor` | `10px` / `#fff4e8` |
+| `haloSize` / `haloOpacity` / `haloStop` | `40px` / `0.35` / `70%` radial-gradient stop |
+| `lightColor` / `intensity` | `#fff4e8` / `500` |
+| `distance` / `decay` | `36` studio units / `2` |
+| `planeOffset` | `10` studio units (centimetres), toward the camera |
+| `stiffness` / `damping` | `180` / `26` |
+| `positionEpsilon` / `velocityEpsilon` | `0.0001` / `0.001`, normalized screen coordinates |
+| `maxFrameSeconds` / `springStepSeconds` / `initialFrameSeconds` | `0.05` / `1/120` / `1/60` seconds |
+| `fadeSeconds` | `0.3` seconds; instant with reduced motion |
+| `keyFloor` / `hemisphereFloor` / `environmentFloor` | per-angle value × `0.025` / `0.02` / `0.04` |
+| `sweepAmplitudeX` / `sweepAmplitudeY` | `0.18` / `0.06` of stage width/height |
+| `sweepRadiansPerAngle` / `sweepYFrequency` | `π/2` / `0.5` |
+
+**Behaviour:** active only at night, while visible, outside blueprint (`blueprint < 0.5`, matching `data-mode`) and outside exit. Studio intensities and torch intensity crossfade together on activation/deactivation; resolved per-angle values are restored exactly at the inactive endpoint. Hiding the document cancels pending frames, hides the decoration and immediately restores lighting. Unmount removes the light/listeners, cancels pending frames and restores the cursor. Leaving night removes input listeners immediately and finishes the outgoing floor fade on demand.
+
+On fine pointers, the 10px DOM dot uses event coordinates directly and `translate3d`: **the cursor has no spring lag**. Only the light lags. The dot is `aria-hidden`, ignores pointer events, and is hidden over interactive controls, links, headers/nav and dialogs. `--pool-x` / `--pool-y` use the same target in the render tick; CSS backdrop lines remain CSS. Leaving the stage hides the dot and springs the light back to `resolveLight(pose.light).pool`. Passive touch listeners read a single finger without cancelling events or changing existing scroll capture. Without a finger, coarse pointers use a sine sweep driven exclusively by `pose.light`, so a stationary stage never animates by itself. Reduced motion cuts directly to the fine-pointer target and uses the resting pool on touch, without a sweep. The rAF loop stops when both spring and floor fade settle; torch ticks bump `renderRevision` without dirtying the key shadow.
+
+**Verification (focused, per AGENTS.md):**
+
+- `tests/viewer.test.mjs`: **40/40 pass**, including the three new torch tests for camera-plane unprojection, spring settling/reduced motion, and floor/rAF lifecycle. The floor test checks exact day/blueprint/exit/hidden restoration, fractional light values, no shadow refresh from torch ticks, and frame/light cleanup. Existing lens restoration, blueprint cache, shadow, fit and exit tests in this affected file also pass. After the final day-render optimization, the relevant eight-test subset was rerun: **8/8 pass**.
+- Typecheck passes using Node **24.18.0**. The machine's default shell resolves an older Node, so verification invoked `D:/SDK/Node/nodejs/node.exe` explicitly.
+- `e2e/v2-scroll.spec.ts`, `--grep "torch"`: **5/5 pass** with `CAPTURE_TORCH=1` and `COMPARE_TORCH_MAIN=1`, using `playwright.torch.config.ts`. These cover exact dot coordinates, control cursors, day/blueprint suppression, night exit cleanup, stationary frames and reversible scroll, passive touch scrolling/reduced motion, owner captures and comparison against main.
+- The sibling `../server` is absent. The focused configuration runs the existing **offline V2 demo** with Chromium/SwiftShader, rather than the server-backed commerce suite. The normal-motion test exercises the native theme transition and light settling. The full unit suite, full server-backed E2E suite and production build were **not run**.
+- At 1920 × 945 against main `357ba31`, day angles **0/1/2/3 are byte-identical**, and the **night blueprint is byte-identical**. Front has **105 differing pixels**, each at most **one 8-bit channel level**, in the final SwiftShader comparison; there are no differences greater than one. This is recorded honestly in [main-comparison.json](screenshots/v2-night-torch/main-comparison.json), not reported as exact pixel equality for Front. Day uses the original lighting and materials throughout, with no active torch light.
+
+**Owner screenshots:** [screenshots/v2-night-torch/](screenshots/v2-night-torch/) contains **12 night stills at 1920 × 945**: Three-quarter, Side, Hinge and Front, each with the pointer at upper-left, centre and lower-right frame regions. Stills use reduced motion to capture the exact settled target. [reference-comparison.png](screenshots/v2-night-torch/reference-comparison.png) compares actual recording frames at **0.71s / 3.06s** with opposite Front light positions; the supplied recording contact sheet was also reviewed. The screenshot folder's [README](screenshots/v2-night-torch/README.md) lists positions and reproduction commands.
+
+**Left for owner review:** final visual tuning and the feel of the slight light lag on a hardware-accelerated browser, especially the broader macro Hinge highlight, plus online header/nav hover behaviour with the server available. The screenshots show genuine moving 3D highlights while the opposite rim/temple stays black; glossy black acetate responds differently from the white marble reference. The Moon/Sun control remains bottom-left; the stale Phase 1 placement line above is corrected.

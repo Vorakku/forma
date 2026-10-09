@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { ELLIS_OVERLAY_GLASS } from "./ellis";
+import { createNightTorch, TORCH, torchScale } from "./night-torch";
 import type { V2Theme } from "./v2-theme";
 import { applyExitPath, type ExitPath } from "./scroll-exit";
 import { sampleFrameSurface } from "./screen-motion";
@@ -23,10 +24,14 @@ export function createScrollViewer({
   canvas,
   onError,
   onResize,
+  stage,
+  torchDot,
 }: {
   canvas: HTMLCanvasElement;
   onError: () => void;
   onResize?: () => void;
+  stage?: HTMLElement;
+  torchDot?: HTMLElement;
 }) {
   let observer: ResizeObserver | undefined;
   let pose: ScenePose | undefined;
@@ -76,6 +81,26 @@ export function createScrollViewer({
   const target = new THREE.Vector3();
   const offset = new THREE.Vector3();
   const spherical = new THREE.Spherical();
+  let resolved = resolveLight(0);
+  const torch = createNightTorch({
+    scene: studio.scene,
+    camera: studio.camera,
+    stage,
+    dot: torchDot,
+    invalidate: () => { renderRevision++; render(); },
+  });
+
+  function configureTorch() {
+    torch.configure(theme, blueprintMix >= 0.5 || (pose?.exit ?? 0) > 0 ||
+      !!stage?.hasAttribute("data-exiting") || !!stage?.hasAttribute("data-exit"),
+      resolved.pool.x, resolved.pool.y, pose?.light ?? 0);
+  }
+
+  function applyTorchFloor() {
+    studio.key.intensity = resolved.key.intensity * torchScale(TORCH.keyFloor, torch.mix);
+    studio.hemisphere.intensity = resolved.hemisphere * torchScale(TORCH.hemisphereFloor, torch.mix);
+    studio.scene.environmentIntensity = resolved.environment * torchScale(TORCH.environmentFloor, torch.mix);
+  }
 
   function render() {
     if (stopped || document.hidden || !pose) return;
@@ -92,6 +117,8 @@ export function createScrollViewer({
       studio.camera.far = 1000;
       studio.camera.updateProjectionMatrix();
     }
+    torch.prepare();
+    applyTorchFloor();
     studio.render((renderer) => {
       // Directional shadows depend on the model/light, not the viewing camera.
       renderer.shadowMap.autoUpdate = false;
@@ -124,6 +151,9 @@ export function createScrollViewer({
   }
 
   function visibility() {
+    configureTorch();
+    applyTorchFloor();
+    renderRevision++;
     if (!document.hidden) render();
   }
 
@@ -138,6 +168,8 @@ export function createScrollViewer({
   function dispose() {
     if (stopped) return;
     stopped = true;
+    torch.dispose();
+    applyTorchFloor();
     observer?.disconnect();
     document.removeEventListener("visibilitychange", visibility);
     exploder?.set(0);
@@ -253,6 +285,15 @@ export function createScrollViewer({
       theme = next;
       applyLensTheme();
       renderRevision++;
+      configureTorch();
+      render();
+    },
+    setReducedMotion(value: boolean) {
+      if (stopped) return;
+      torch.setReducedMotion(value);
+      if (theme === "day" && torch.mix === 0) return;
+      configureTorch();
+      renderRevision++;
       render();
     },
     getAnchor(name: string) {
@@ -271,6 +312,7 @@ export function createScrollViewer({
       if (stopped) return;
       const light = next.light ?? 0;
       const resolvedLight = resolveLight(light);
+      resolved = resolvedLight;
       keyPosition.setFromSphericalCoords(
         KEY_DISTANCE,
         THREE.MathUtils.degToRad(90 - resolvedLight.key.elevation),
@@ -322,6 +364,7 @@ export function createScrollViewer({
         phi: clampPhi(next.phi),
       };
       applyLensTheme();
+      configureTorch();
       render();
     },
     dispose,
