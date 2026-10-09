@@ -321,6 +321,46 @@ test("End and jumps stop at Front; Home returns from inside the exit", () => {
   }
 });
 
+test("reverse keys and fresh wheel notches inside an exit scrub stop at Front", () => {
+  for (const key of ["ArrowUp", "PageUp", " "]) {
+    const h = finale();
+    h.wheel(4, 0);
+    h.setTime(4.3);
+    assert.deepEqual(h.send("key", 20, { key, shiftKey: true }), animate(4));
+  }
+  const h = finale();
+  h.send("touchStart", 0);
+  h.send("touchMove", 200, { deltaY: 100 });
+  h.send("touchEnd", 300);
+  h.setTime(4.2);
+  assert.deepEqual(h.wheel(-100, 400), animate(4));
+});
+
+test("reverse wheel interrupts a consumed exit notch and its tail cannot skip Front", () => {
+  const h = finale();
+  assert.deepEqual(h.wheel(100, 0), animate(5));
+  h.setTime(4.3);
+  assert.deepEqual(h.wheel(-100, 80), animate(4));
+  h.setTime(4.1);
+  assert.deepEqual(h.wheel(-20, 100), []);
+  h.setTime(4);
+  h.send("landed", 150, { angle: 4 });
+  assert.deepEqual(h.wheel(-20, 200), []);
+  assert.deepEqual(h.wheel(-100, 400), animate(3), "a later fresh gesture can leave Front normally");
+});
+
+test("a reverse wheel arriving just after an exit scrub lands cannot skip Front", () => {
+  const h = finale();
+  h.send("touchStart", 0);
+  h.send("touchMove", 200, { deltaY: 100 });
+  h.send("touchEnd", 300);
+  h.setTime(4);
+  h.send("landed", 500, { angle: 4 });
+  assert.deepEqual(h.wheel(-100, 520), []);
+  assert.deepEqual(h.wheel(-20, 560), []);
+  assert.deepEqual(h.wheel(-100, 760), animate(3));
+});
+
 test("forward repeat stops at Front; backward input still steps", () => {
   for (const key of ["ArrowDown", "PageDown", " "])
     assert.deepEqual(finale().send("key", 0, { key, repeat: true }), []);

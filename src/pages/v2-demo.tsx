@@ -29,11 +29,10 @@ import {
   acceptsStepInput,
   GESTURE_IDLE_MS,
   EXIT_HOLD_S,
-  EXIT_SCALE,
   type StepCommand,
   type StepEvent,
 } from "@/tryon/scroll-steps";
-import { resolveExitDolly, withExitBudget, appendExitTimeline } from "@/tryon/scroll-exit";
+import { resolveExitPath, exitSurface, withExitBudget, appendExitTimeline } from "@/tryon/scroll-exit";
 import type { Product } from "@/lib/types";
 import "./v2-demo.css";
 
@@ -431,23 +430,23 @@ function V2Stage({
           animation?.tween.kill();
           animation = undefined;
         };
-        let dolly = resolveExitDolly(poses()[last], viewer.width, viewer.height, viewer.frontPlane);
-        const installDolly = () => {
-          viewer!.setExitDolly(dolly);
-          const modelPoint = viewer!.modelPoint(dolly.point);
+        let exitPath = resolveExitPath(poses()[last], viewer.width, viewer.height, viewer.exitModel);
+        const installPath = () => {
+          viewer!.setExitPath(exitPath);
+          const modelPoint = viewer!.modelPoint(exitPath.point);
           element.dataset.exitPoint = JSON.stringify(modelPoint.toArray());
-          element.style.setProperty("--exit-origin-x", dolly.origin.x + "px");
-          element.style.setProperty("--exit-origin-y", dolly.origin.y + "px");
         };
-        installDolly();
+        installPath();
         let timeline: gsap.core.Timeline;
         const update = () => {
           const u = pose.exit;
           if (u > 0) element.dataset.exit = String(u);
           else element.removeAttribute("data-exit");
-          element.style.setProperty("--exit-scale", String(EXIT_SCALE ** u));
-          element.style.setProperty("--exit-chrome-opacity", String(Math.max(0, 1 - u / 0.25)));
-          element.style.setProperty("--exit-paper-opacity", String(Math.max(0, (u - 0.85) / 0.15)));
+          const surface = exitSurface(u);
+          element.style.setProperty("--exit-copy-opacity", String(surface.copyOpacity));
+          element.style.setProperty("--exit-copy-scale", String(surface.copyScale));
+          element.style.setProperty("--exit-chrome-opacity", String(surface.chromeOpacity));
+          element.style.setProperty("--exit-paper-opacity", String(surface.paperOpacity));
           element.dataset.explode = String(pose.explode);
           const { pool } = resolveLight(pose.light);
           element.style.setProperty("--pool-x", pool.x + "%");
@@ -510,8 +509,8 @@ function V2Stage({
           const running = !!animation,
             velocity = animation?.velocity() ?? 0;
           stopAnimation();
-          dolly = resolveExitDolly(poses()[last], viewer!.width, viewer!.height, viewer!.frontPlane);
-          installDolly();
+          exitPath = resolveExitPath(poses()[last], viewer!.width, viewer!.height, viewer!.exitModel);
+          installPath();
           budget = computeBudget();
           seconds.splice(0, seconds.length, ...budget.seconds);
           populateScrollTimeline(timeline, pose, poses(), budget);

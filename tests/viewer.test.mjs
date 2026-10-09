@@ -15,7 +15,7 @@ const output = resolve(".sites-runtime/viewer-tests.mjs");
 await build({
   stdin: {
     contents:
-      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './screen-motion';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';export * from './studio-environment';export * from './v2-theme';",
+      "export * from './viewer';export * from './glasses';export * from './resources';export * from './scroll-viewer';export * from './scroll-exit';export * from './scroll-poses';export * from './scroll-timeline';export * from './scroll-budget';export * from './screen-motion';export * from './explode';export * from './scroll-steps';export * from './blueprint';export * from './blueprint-theme';export * from './ellis';export * from './studio-environment';export * from './v2-theme';",
     resolveDir: resolve("src/tryon"),
   },
   outfile: output,
@@ -50,6 +50,7 @@ const {
   VIEWER_ROTATION_STEP,
   DIRECTIONS,
   createScrollViewer,
+  resolveExitPath,
   resolveScrollPoses,
   populateScrollTimeline,
   clampPhi,
@@ -1976,4 +1977,43 @@ test("V2 theme defaults to day, validates stored choices and tolerates denied st
   assert.deepEqual(writes, [[V2_THEME_KEY, "night"]]);
   assert.doesNotThrow(() => saveV2Theme(() => { throw Error("denied"); }, "night"));
   assert.doesNotThrow(() => saveV2Theme(() => ({ setItem: () => { throw Error("denied"); } }), "day"));
+});
+
+
+test("wearer exit restores camera and existing glass in both themes, with one render per scrub", () => {
+  for (const theme of ["day", "night"]) {
+    const h = devices();
+    const viewer = createScrollViewer({ canvas: h.canvas, onError: () => assert.fail("unexpected failure") });
+    const model = buildDisplayGlasses(product(), 0);
+    viewer.setObject(model);
+    viewer.setTheme(theme);
+    const poses = resolveScrollPoses(viewer.radius, viewer.aspect, viewer.getAnchor, viewer.explodedRadius);
+    const first = resolveExitPath(poses[4], viewer.width, viewer.height, viewer.exitModel);
+    // Resolve after exploding the LIVE model, as a resize on Side would do.
+    viewer.setPose(poses[1]);
+    const rebuilt = resolveExitPath(poses[4], 375, 812, viewer.exitModel);
+    assert.deepEqual(rebuilt.point.toArray(), first.point.toArray());
+    viewer.setExitPath(first);
+    viewer.setPose(poses[4]);
+    const glass = model.getObjectByName("lens_R").material;
+    const base = { opacity: glass.opacity, transmission: glass.transmission, transparent: glass.transparent, depthWrite: glass.depthWrite };
+    const renderer = h.renderers[0];
+    const parked = { position: renderer.camera.position.clone(), quaternion: renderer.camera.quaternion.clone() };
+    const before = renderer.renders;
+    const samples = [0.2, 0.4, 0.65, 0.85, 1, 0.85, 0.65, 0.4, 0.2, 0];
+    for (const u of samples) {
+      viewer.setPose({ ...poses[4], exit: u });
+      assert.equal(glass.transmission, base.transmission);
+      assert.deepEqual({ opacity: glass.opacity, transmission: glass.transmission, transparent: glass.transparent, depthWrite: glass.depthWrite }, base,
+        "scrubbing never changes the glass shade or depth recipe");
+    }
+    assert.equal(renderer.renders - before, samples.length);
+    assert.equal(h.callbacks.size, 0, "exit never schedules a continuous render loop");
+    assert.deepEqual(renderer.camera.position.toArray(), parked.position.toArray());
+    assert.ok(renderer.camera.quaternion.angleTo(parked.quaternion) < 1e-7);
+    assert.deepEqual([renderer.camera.fov, renderer.camera.near, renderer.camera.far], [30, 0.1, 1000]);
+    assert.deepEqual({ opacity: glass.opacity, transmission: glass.transmission, transparent: glass.transparent, depthWrite: glass.depthWrite }, base);
+    assert.deepEqual(h.errors, []);
+    viewer.dispose();
+  }
 });

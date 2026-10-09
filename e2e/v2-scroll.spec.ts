@@ -824,7 +824,7 @@ test("early exit touch scrub returns to Front with the finale copy visible", asy
     await expect(stage).toHaveAttribute("data-moving", "true");
     await expect.poll(() => stage.getAttribute("data-exit").then(Number)).toBeGreaterThan(0);
     await expect.poll(() => stage.getAttribute("data-exit").then(Number)).toBeLessThan(0.5);
-    await expect(stage.locator(".v2-demo-finale")).toBeVisible();
+    await expect(stage.locator(".v2-demo-finale")).toHaveCSS("opacity", "1");
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await landed(page, 4);
     await expect(stage).not.toHaveAttribute("data-exit");

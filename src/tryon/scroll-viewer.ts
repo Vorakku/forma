@@ -1,14 +1,14 @@
 import * as THREE from "three";
 import { ELLIS_OVERLAY_GLASS } from "./ellis";
 import type { V2Theme } from "./v2-theme";
-import { applyExitDolly, exitFrontPlane, type ExitDolly } from "./scroll-exit";
+import { applyExitPath, type ExitPath } from "./scroll-exit";
 import { sampleFrameSurface } from "./screen-motion";
 import { createStudio } from "./studio";
 import { createExploder } from "./explode";
 import { createBlueprint } from "./blueprint";
 import { createBlueprintRender } from "./blueprint-render";
 import type { BlueprintTokens } from "./blueprint-theme";
-import { VIEWER_MAX_PIXEL_RATIO } from "./studio";
+import { VIEWER_FOV, VIEWER_MAX_PIXEL_RATIO } from "./studio";
 import { buildStudioEnvironment } from "./studio-environment";
 import { EXPLODE_MM, ENV_FOLLOW } from "./scroll-steps";
 import {
@@ -42,14 +42,18 @@ export function createScrollViewer({
   let blueprintTokens: BlueprintTokens | undefined;
   let surfacePoints: THREE.Vector3[] = [];
   const anchors = new Map<string, THREE.Vector3>();
-  let exitDolly: ExitDolly | undefined;
+  let exitPath: ExitPath | undefined;
   let frontModel: THREE.Object3D | undefined;
+  let assembledModel: THREE.Object3D | undefined;
   let theme: V2Theme = "day";
   const lenses = new Map<THREE.MeshPhysicalMaterial, { [K in keyof typeof ELLIS_OVERLAY_GLASS]: THREE.MeshPhysicalMaterial[K] }>();
   const applyLensTheme = () => {
     for (const [material, day] of lenses) {
-      Object.assign(material, theme === "night" ? ELLIS_OVERLAY_GLASS : day);
-      material.needsUpdate = true;
+      const base = theme === "night" ? ELLIS_OVERLAY_GLASS : day;
+      const transparent = base.transparent;
+      const recompile = material.transparent !== transparent || material.transmission !== base.transmission;
+      Object.assign(material, base);
+      if (recompile) material.needsUpdate = true;
     }
   };
   const studio = createStudio(
@@ -80,9 +84,10 @@ export function createScrollViewer({
     studio.camera.position.copy(target).add(offset.setFromSpherical(spherical));
     studio.camera.up.set(0, 1, 0);
     studio.camera.lookAt(target);
-    if (pose.exit > 0 && exitDolly) {
-      applyExitDolly(studio.camera, exitDolly, pose.exit);
-    } else if (studio.camera.near !== 0.1 || studio.camera.far !== 1000) {
+    if (pose.exit > 0 && exitPath) {
+      applyExitPath(studio.camera, exitPath, pose.exit);
+    } else if (studio.camera.near !== 0.1 || studio.camera.far !== 1000 || studio.camera.fov !== VIEWER_FOV) {
+      studio.camera.fov = VIEWER_FOV;
       studio.camera.near = 0.1;
       studio.camera.far = 1000;
       studio.camera.updateProjectionMatrix();
@@ -140,6 +145,8 @@ export function createScrollViewer({
     anchors.clear();
     lenses.clear();
     surfacePoints = [];
+    assembledModel = undefined;
+    exitPath = undefined;
     disposeBlueprint();
     studio.dispose();
   }
@@ -155,14 +162,14 @@ export function createScrollViewer({
   }
 
   return {
-    get frontPlane() {
-      return exitFrontPlane(frontModel!);
+    get exitModel() {
+      return assembledModel!.getObjectByName("ellis.reference") ?? assembledModel!;
     },
     modelPoint(point: THREE.Vector3) {
       return frontModel!.worldToLocal(point.clone());
     },
-    setExitDolly(value: ExitDolly) {
-      exitDolly = value;
+    setExitPath(value: ExitPath) {
+      exitPath = value;
     },
     get surfacePoints() {
       return surfacePoints;
@@ -214,6 +221,10 @@ export function createScrollViewer({
       anchors.clear();
       object.updateWorldMatrix(true, true);
       frontModel = object.getObjectByName("ellis.reference") ?? object;
+      // Geometry/materials are shared; only resting transforms are copied. A
+      // resize on the exploded Side must still resolve the assembled exit.
+      assembledModel = object.clone(true);
+      assembledModel.updateWorldMatrix(true, true);
       object.traverse((node) => {
         if (node.name)
           anchors.set(node.name, node.getWorldPosition(new THREE.Vector3()));
@@ -310,6 +321,7 @@ export function createScrollViewer({
         exit: THREE.MathUtils.clamp(next.exit ?? 0, 0, 1),
         phi: clampPhi(next.phi),
       };
+      applyLensTheme();
       render();
     },
     dispose,

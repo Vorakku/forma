@@ -13,10 +13,9 @@ export const VISIBLE_MARGIN = 0.1;
 export const RAMP_S = 0.35;
 export const SCRUB_PX_PER_S = 0.25; // × viewport height
 export const JUMP_SPEEDUP = 2;
-export const EXIT_S = 1.6;
+export const EXIT_S = 2.8;
 export const EXIT_HOLD_S = 0.15;
 export const EXIT_REVEAL_S = 0.6;
-export const EXIT_SCALE = 40;
 export const EXIT_BLUR_PX = 12;
 export const EXIT_REDUCED_S = 0.2;
 
@@ -123,6 +122,7 @@ export function createScrollSteps(
   let settled = true;
   let inputAt = -Infinity;
   let lastLandedAt = -Infinity;
+  let returningFromExit = false;
 
   const canExit = (time: number) =>
     landed === lastAngle &&
@@ -146,6 +146,8 @@ export function createScrollSteps(
     )
       return [];
     target = next;
+    if (withExit && next === lastAngle && time > lastAngle) returningFromExit = true;
+    else if (next !== lastAngle) returningFromExit = false;
     if (reduced) {
       landed = target;
       settled = true;
@@ -166,6 +168,10 @@ export function createScrollSteps(
   }
 
   function step(direction: number, time: number, carry = false): StepCommand[] {
+    // A reverse step inside the finale returns to Front first. Scrubbing sets
+    // target to 4, so target + direction would otherwise skip Front and hit 3.
+    if (withExit && time > lastAngle && direction < 0)
+      return move(lastAngle, time, carry);
     let next = target + direction;
     // Retarget a running step, with at most one extra angle awaiting its landing.
     if (flightAnchor !== undefined)
@@ -297,6 +303,19 @@ export function createScrollSteps(
           }
           const current = gesture!;
           current.last = event.at;
+          // A wheel event can arrive just after the reverse animation lands.
+          // Give Front the same brief landing guard so that event's tail cannot
+          // continue through it to 3. Normal angle arrivals are unaffected.
+          if (withExit && returningFromExit && event.deltaY < 0 &&
+            event.time === lastAngle && event.at - lastLandedAt < GESTURE_IDLE_MS) {
+            current.consumed = true;
+            return commands;
+          }
+          // Reverse an in-flight exit even within a consumed notch gesture.
+          // Keep consuming its tail so the same gesture cannot skip to 3.
+          if (withExit && event.time > lastAngle && event.deltaY < 0 &&
+            current.consumed && target > lastAngle)
+            return move(lastAngle, event.time, true);
           if (current.consumed) return commands;
           // Even a gesture starting just after landing must wait for idle.
           // Consume it so its momentum cannot become eligible later.

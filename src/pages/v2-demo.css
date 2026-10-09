@@ -548,6 +548,7 @@
    overlaps it from the canvas above. Frame spans ±31cqmin across and
    −9.4…+11.2cqmin down from the centre (measured at 1920 × 945). */
 .v2-demo-finale {
+  --finale-scale: 1;
   inset: 0;
   container-type: size;
   pointer-events: none;
@@ -556,14 +557,15 @@
   position: absolute;
 }
 .v2-demo-finale .eyebrow {
-  left: calc(50cqw - 31cqmin);
-  bottom: calc(50cqh + 28.8cqmin + 24px);
+  left: calc(50cqw - 31cqmin * var(--finale-scale));
+  bottom: calc(50cqh + (28.8cqmin + 24px) * var(--finale-scale));
+  font-size: calc(0.75rem * var(--finale-scale));
   margin: 0;
   color: var(--warm);
 }
 .v2-demo-finale h2 {
   inset: 0;
-  font: 600 26cqmin / 0.78 "Big Shoulders Display", Arial, sans-serif;
+  font: 600 calc(26cqmin * var(--finale-scale)) / 0.78 "Big Shoulders Display", Arial, sans-serif;
   text-transform: uppercase;
 }
 .v2-demo-finale h2 span {
@@ -571,26 +573,26 @@
   white-space: nowrap;
 }
 .v2-demo-finale h2 span:first-child {
-  left: calc(50cqw - 31cqmin);
-  bottom: calc(50cqh + 8.5cqmin);
+  left: calc(50cqw - 31cqmin * var(--finale-scale));
+  bottom: calc(50cqh + 8.5cqmin * var(--finale-scale));
 }
 .v2-demo-finale h2 span:last-child {
-  right: calc(50cqw - 31cqmin);
-  top: calc(50cqh + 10cqmin);
+  right: calc(50cqw - 31cqmin * var(--finale-scale));
+  top: calc(50cqh + 10cqmin * var(--finale-scale));
 }
 .finale-aside {
-  left: calc(50cqw + 31cqmin + 40px);
-  top: calc(50cqh + 11cqmin);
+  left: calc(50cqw + (31cqmin + 40px) * var(--finale-scale));
+  top: calc(50cqh + 11cqmin * var(--finale-scale));
 }
 .finale-aside em {
   display: block;
-  font-size: 2rem;
+  font-size: calc(2rem * var(--finale-scale));
   line-height: 1;
   color: var(--warm);
 }
 .finale-aside p {
-  margin-top: 10px;
-  font-size: 0.75rem;
+  margin-top: calc(10px * var(--finale-scale));
+  font-size: calc(0.75rem * var(--finale-scale));
   line-height: 1.5;
   color: var(--muted);
 }
@@ -614,21 +616,21 @@
 @media (max-aspect-ratio: 1/1) {
   .finale-aside {
     left: auto;
-    right: calc(50cqw - 31cqmin);
-    top: calc(50cqh + 30.3cqmin + 24px);
+    right: calc(50cqw - 31cqmin * var(--finale-scale));
+    top: calc(50cqh + (30.3cqmin + 24px) * var(--finale-scale));
     text-align: right;
   }
   .v2-demo-finale .eyebrow {
-    left: 24px;
+    left: calc(50cqw + (24px - 50cqw) * var(--finale-scale));
   }
   .v2-demo-finale h2 span:first-child {
-    left: 24px;
+    left: calc(50cqw + (24px - 50cqw) * var(--finale-scale));
   }
   .v2-demo-finale h2 span:last-child {
-    right: 24px;
+    right: calc(50cqw + (24px - 50cqw) * var(--finale-scale));
   }
   .finale-aside {
-    right: 24px;
+    right: calc(50cqw + (24px - 50cqw) * var(--finale-scale));
   }
   .v2-demo-finale-foot {
     right: 24px;
@@ -652,11 +654,14 @@
   pointer-events: auto;
 }
 
-/* The finale is one front-plane layer; the lower spec/CTA remain stage chrome. */
+/* Editorial copy zooms from the screen centre as the camera begins its orbit.
+   It remains a flat front-plane layer, with no fade or camera rotation. */
 .v2-demo-stage[data-exit] .v2-demo-finale {
   display: block;
-  transform: scale(var(--exit-scale));
-  transform-origin: var(--exit-origin-x) var(--exit-origin-y);
+  opacity: var(--exit-copy-opacity);
+  /* Scale type and its centred offsets in layout. A huge transformed stage
+     can leave stale text tiles when Chromium scrubs back from the endpoint. */
+  --finale-scale: var(--exit-copy-scale);
 }
 .v2-demo-stage[data-exit] .v2-demo-finale-foot {
   display: flex;
