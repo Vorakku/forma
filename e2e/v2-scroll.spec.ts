@@ -1,11 +1,266 @@
 import { test, expect, type Page } from "@playwright/test";
 import { SCROLL_ANGLES } from "../src/tryon/scroll-poses";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 
 test.use({
   viewport: { width: 1808, height: 1018 },
   launchOptions: {
     args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
   },
+});
+
+test("torch fine pointer tracks exactly, preserves controls, disables on blueprint/day and cleans up on exit", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/v2-demo");
+  const stage = await ready(page);
+  const dot = stage.locator(".v2-demo-torch");
+  const toggle = page.getByRole("button", { name: "Night mode" });
+  await page.mouse.move(900, 500);
+  await expect(dot).toBeHidden();
+  await expect(stage).not.toHaveCSS("cursor", "none");
+  await toggle.click();
+  await toggle.evaluate(element => element.blur());
+  await page.mouse.move(750, 420);
+  await expect(dot).toBeVisible();
+  await expect(dot).toHaveAttribute("aria-hidden", "true");
+  await expect(dot).toHaveCSS("pointer-events", "none");
+  await expect(stage).toHaveCSS("cursor", "none");
+  expect(await dot.evaluate(element => {
+    const r = element.getBoundingClientRect();
+    return [r.x + r.width / 2, r.y + r.height / 2];
+  })).toEqual([750, 420]);
+  await expect(stage).toHaveAttribute("data-torch-settled", "true");
+  expect(await stage.evaluate(element => [element.style.getPropertyValue("--pool-x"), element.style.getPropertyValue("--pool-y")]).then(values => values.map(parseFloat)))
+    .toEqual([750 / 1808 * 100, 420 / 1018 * 100]);
+  await toggle.hover();
+  await expect(dot).toBeHidden();
+  await expect(stage).not.toHaveCSS("cursor", "none");
+  await expect(toggle).toHaveCSS("cursor", "pointer");
+  await page.mouse.move(900, 500);
+  await page.keyboard.press("ArrowDown");
+  await landed(page, 1);
+  await page.keyboard.press("ArrowDown");
+  await landed(page, 2);
+  await expect(dot).toBeHidden();
+  await expect(stage).not.toHaveAttribute("data-torch-active");
+  await expect(stage).not.toHaveCSS("cursor", "none");
+  await page.keyboard.press("Home");
+  await landed(page, 0);
+  await expect(dot).toBeVisible();
+  await toggle.click();
+  await page.mouse.move(900, 500);
+  await expect(dot).toBeHidden();
+  await expect(stage).not.toHaveCSS("cursor", "none");
+  await toggle.click();
+  await toggle.evaluate(element => element.blur());
+  await page.mouse.move(900, 500);
+  await page.keyboard.press("End");
+  await landed(page, 4);
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator(".v2-demo-stage")).toHaveCount(0);
+  await expect(page.locator(".v2-demo-torch, [data-torch-pointer], [data-torch-active]")).toHaveCount(0);
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme");
+  expect(await page.evaluate(() => [...document.querySelectorAll("*")].some(element => getComputedStyle(element).cursor === "none"))).toBe(false);
+});
+
+test("torch normal motion spring/floor settles, rests on leave and survives reversible scroll", async ({ page }) => {
+  await page.goto("/v2-demo");
+  const stage = await ready(page);
+  await page.getByRole("button", { name: "Night mode" }).click();
+  await page.getByRole("button", { name: "Night mode" }).evaluate(element => element.blur());
+  await page.mouse.move(720, 350);
+  await expect(stage.locator(".v2-demo-torch")).toBeVisible();
+  await expect(stage).toHaveAttribute("data-torch-settled", "true", { timeout: 30_000 });
+  const still = await stage.screenshot();
+  await page.waitForTimeout(200);
+  expect((await stage.screenshot()).equals(still)).toBe(true);
+  await stage.dispatchEvent("pointerleave");
+  await expect(stage.locator(".v2-demo-torch")).toBeHidden();
+  await expect(stage).toHaveAttribute("data-torch-settled", "true");
+  expect(await stage.evaluate(element => [element.style.getPropertyValue("--pool-x"), element.style.getPropertyValue("--pool-y")])).toEqual(["50%", "35%"]);
+  await page.keyboard.press("ArrowDown");
+  await landed(page, 1);
+  await page.keyboard.press("ArrowDown");
+  await landed(page, 2);
+  await expect(stage.locator(".v2-demo-torch")).toBeHidden();
+  await page.keyboard.press("ArrowUp");
+  await landed(page, 1);
+  await expect(stage).toHaveAttribute("data-torch-active", "");
+  await expect(stage).toHaveAttribute("data-torch-settled", "true", { timeout: 30_000 });
+});
+
+test.describe("torch touch", () => {
+  test.use({ hasTouch: true, isMobile: true });
+  test("passive finger light preserves scroll capture; reduced motion stays at rest without sweep", async ({ page }) => {
+    await page.goto("/v2-demo");
+    const stage = await ready(page);
+    await page.getByRole("button", { name: "Night mode" }).click();
+    await page.getByRole("button", { name: "Night mode" }).evaluate(element => element.blur());
+    await expect(stage).toHaveAttribute("data-torch-settled", "true");
+    await expect(stage.locator(".v2-demo-torch")).toBeHidden();
+    const touch = await page.context().newCDPSession(page);
+    await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 750, y: 600 }] });
+    await expect.poll(() => stage.evaluate(element => parseFloat(element.style.getPropertyValue("--pool-x")))).toBeCloseTo(750 / 1808 * 100, 4);
+    await touch.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: 800, y: 400 }] });
+    await expect(stage).toHaveAttribute("data-moving", "true");
+    await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await landed(page, 1);
+    await expect(stage).toHaveAttribute("data-torch-settled", "true");
+    expect(await stage.evaluate(element => parseFloat(element.style.getPropertyValue("--pool-x")))).not.toBe(60);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect.poll(() => stage.evaluate(element => parseFloat(element.style.getPropertyValue("--pool-x")))).toBe(60);
+    await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 700, y: 500 }] });
+    await expect(stage).toHaveAttribute("data-torch-settled", "true");
+    expect(await stage.evaluate(element => [element.style.getPropertyValue("--pool-x"), element.style.getPropertyValue("--pool-y")])).toEqual(["60%", "30%"]);
+    await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect(stage.locator(".v2-demo-torch")).toBeHidden();
+  });
+});
+
+test("torch owner captures at every non-blueprint angle", async ({ page }) => {
+  test.skip(process.env.CAPTURE_TORCH !== "1", "owner screenshots are explicitly requested by CAPTURE_TORCH=1");
+  await page.setViewportSize({ width: 1920, height: 945 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript(() => localStorage.setItem("forma.v2.theme", "night"));
+  await page.goto("/v2-demo");
+  const stage = await ready(page);
+  const directory = resolve("doc/feature/screenshots/v2-night-torch");
+  await mkdir(directory, { recursive: true });
+  // Screen-space frame regions, including the macro hinge and exploded parts.
+  const regions = [
+    [640, 400, 1230, 610],
+    [670, 370, 1180, 580],
+    [],
+    [550, 240, 1220, 700],
+    [700, 400, 1220, 550],
+  ];
+  for (let angle = 0; angle < 5; angle++) {
+    if (angle) await page.keyboard.press("ArrowDown");
+    await landed(page, angle);
+    if (angle === 2) continue;
+    const [left, top, right, bottom] = regions[angle];
+    const positions = [[left, top], [(left + right) / 2, (top + bottom) / 2], [right, bottom]];
+    for (const [index, [x, y]] of positions.entries()) {
+      await page.mouse.move(x, y);
+      await expect(stage.locator(".v2-demo-torch")).toBeVisible();
+      await expect(stage).toHaveAttribute("data-torch-settled", "true");
+      await stage.screenshot({ path: resolve(directory, `1920x945-angle-${angle}-${["upper-left", "centre", "lower-right"][index]}.png`) });
+    }
+  }
+  const recording = await readFile("doc/feature/Recording 2026-10-08 145119.mp4");
+  const left = await readFile(resolve(directory, "1920x945-angle-4-upper-left.png"));
+  const right = await readFile(resolve(directory, "1920x945-angle-4-lower-right.png"));
+  await page.setViewportSize({ width: 1920, height: 1350 });
+  await page.setContent(`<video muted preload="auto" src="data:video/mp4;base64,${recording.toString("base64")}" style="display:none"></video>`);
+  const references = await page.evaluate(async () => {
+    const video = document.querySelector("video")!;
+    if (video.readyState < 1) await new Promise<void>(resolve => video.addEventListener("loadedmetadata", () => resolve(), { once: true }));
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const images: string[] = [];
+    for (const time of [0.71, 3.06]) {
+      await new Promise<void>(resolve => {
+        video.addEventListener("seeked", () => resolve(), { once: true });
+        video.currentTime = time;
+      });
+      canvas.getContext("2d")!.drawImage(video, 0, 0);
+      images.push(canvas.toDataURL());
+    }
+    return images;
+  });
+  await page.setContent(`<main style="font:24px sans-serif;margin:0"><h1>Reference recording (0.71s / 3.06s) and FORMA torch (left / right)</h1><section style="display:flex">${references.map(image => `<img style="width:960px;height:700px;object-fit:contain" src="${image}">`).join("")}</section><section style="display:flex">${[left, right].map(image => `<img style="width:960px" src="data:image/png;base64,${image.toString("base64")}">`).join("")}</section></main>`);
+  await page.screenshot({ path: resolve(directory, "reference-comparison.png") });
+});
+
+test("torch day and night blueprint pixels match main", async ({ page, context }, testInfo) => {
+  test.skip(process.env.COMPARE_TORCH_MAIN !== "1", "requires the opt-in main baseline server");
+  await page.setViewportSize({ width: 1920, height: 945 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const baseline = await context.newPage();
+  await baseline.setViewportSize({ width: 1920, height: 945 });
+  await baseline.emulateMedia({ reducedMotion: "reduce" });
+  await page.bringToFront();
+  await page.goto("/v2-demo");
+  const currentStage = await ready(page);
+  await baseline.bringToFront();
+  await baseline.goto("http://localhost:4178/v2-demo");
+  const baselineStage = await ready(baseline);
+  const results: { theme: string; angle: number; identical: boolean; differentPixels: number; maxChannelDelta: number }[] = [];
+  const compare = async (current: Buffer, original: Buffer) => {
+    if (current.equals(original)) return { identical: true, differentPixels: 0, maxChannelDelta: 0 };
+    const result = await page.evaluate(async ([a, b]) => {
+      const pixels = async (base64: string) => {
+        const image = new Image();
+        image.src = "data:image/png;base64," + base64;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const context = canvas.getContext("2d")!;
+        context.drawImage(image, 0, 0);
+        return context.getImageData(0, 0, image.width, image.height).data;
+      };
+      const left = await pixels(a), right = await pixels(b);
+      let differentPixels = 0, maxChannelDelta = 0;
+      for (let i = 0; i < left.length; i += 4) {
+        let changed = false;
+        for (let c = 0; c < 4; c++) {
+          const delta = Math.abs(left[i + c] - right[i + c]);
+          changed ||= delta > 0;
+          maxChannelDelta = Math.max(maxChannelDelta, delta);
+        }
+        if (changed) differentPixels++;
+      }
+      return { identical: differentPixels === 0, differentPixels, maxChannelDelta };
+    }, [current.toString("base64"), original.toString("base64")]);
+    await testInfo.attach("current", { body: current, contentType: "image/png" });
+    await testInfo.attach("main", { body: original, contentType: "image/png" });
+    return result;
+  };
+  for (let angle = 0; angle < 5; angle++) {
+    if (angle) {
+      await page.bringToFront();
+      await page.keyboard.press("ArrowDown");
+      await landed(page, angle);
+      await baseline.bringToFront();
+      await baseline.keyboard.press("ArrowDown");
+    }
+    await landed(page, angle);
+    await landed(baseline, angle);
+    await page.bringToFront();
+    const currentImage = await currentStage.screenshot();
+    await baseline.bringToFront();
+    const comparison = await compare(currentImage, await baselineStage.screenshot());
+    results.push({ theme: "day", angle, ...comparison });
+    expect(comparison.maxChannelDelta, `day angle ${angle}: software WebGL may differ by one channel level`).toBeLessThanOrEqual(1);
+  }
+  for (const target of [page, baseline]) {
+    await target.bringToFront();
+    await target.getByRole("button", { name: "Night mode" }).click();
+    await target.getByRole("button", { name: "Night mode" }).evaluate(element => element.blur());
+    await target.keyboard.press("Home");
+    await landed(target, 0);
+    await target.keyboard.press("ArrowDown");
+    await landed(target, 1);
+    await target.keyboard.press("ArrowDown");
+    await landed(target, 2);
+  }
+  await page.bringToFront();
+  const currentImage = await currentStage.screenshot();
+  await baseline.bringToFront();
+  const comparison = await compare(currentImage, await baselineStage.screenshot());
+  results.push({ theme: "night", angle: 2, ...comparison });
+  expect(comparison.identical, "night blueprint must match main pixel-for-pixel").toBe(true);
+  const directory = resolve("doc/feature/screenshots/v2-night-torch");
+  await mkdir(directory, { recursive: true });
+  await writeFile(resolve(directory, "main-comparison.json"), JSON.stringify({
+    main: execFileSync("git", ["rev-parse", "main"], { encoding: "utf8" }).trim(),
+    viewport: { width: 1920, height: 945 }, renderer: "Chromium SwiftShader", route: "offline V2", results,
+  }, null, 2) + "\n");
+  await baseline.close();
 });
 
 async function ready(page: Page) {

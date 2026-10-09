@@ -268,6 +268,7 @@ function V2Stage({
   const load = { loading, error: loadError };
   const stage = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const torchDot = useRef<HTMLSpanElement>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
   const [angle, setAngle] = useState(0);
@@ -351,6 +352,8 @@ function V2Stage({
       try {
         viewer = createScrollViewer({
           canvas: canvas.current,
+          stage: stage.current!,
+          torchDot: torchDot.current!,
           onError: () => {
             clearMode();
             if (live) setError(true);
@@ -528,6 +531,7 @@ function V2Stage({
           },
           (context) => {
             reducedMotion = !!context.conditions?.reduced;
+            viewer!.setReducedMotion(reducedMotion);
             themeTween?.kill();
             clearThemeOverrides();
             recolor();
@@ -792,6 +796,7 @@ function V2Stage({
         </button>
       )}
       <div className="v2-demo-paper" aria-hidden="true" />
+      <span className="v2-demo-torch" ref={torchDot} aria-hidden="true" hidden />
       <span className="v2-demo-announcement" aria-live="polite">
         {ready &&
           !unavailable &&

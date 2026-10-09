@@ -1,0 +1,53 @@
+{
+  "main": "357ba31292535e727cac78215aaf147e8b2236e3",
+  "viewport": {
+    "width": 1920,
+    "height": 945
+  },
+  "renderer": "Chromium SwiftShader",
+  "route": "offline V2",
+  "results": [
+    {
+      "theme": "day",
+      "angle": 0,
+      "identical": true,
+      "differentPixels": 0,
+      "maxChannelDelta": 0
+    },
+    {
+      "theme": "day",
+      "angle": 1,
+      "identical": true,
+      "differentPixels": 0,
+      "maxChannelDelta": 0
+    },
+    {
+      "theme": "day",
+      "angle": 2,
+      "identical": true,
+      "differentPixels": 0,
+      "maxChannelDelta": 0
+    },
+    {
+      "theme": "day",
+      "angle": 3,
+      "identical": true,
+      "differentPixels": 0,
+      "maxChannelDelta": 0
+    },
+    {
+      "theme": "day",
+      "angle": 4,
+      "identical": false,
+      "differentPixels": 105,
+      "maxChannelDelta": 1
+    },
+    {
+      "theme": "night",
+      "angle": 2,
+      "identical": true,
+      "differentPixels": 0,
+      "maxChannelDelta": 0
+    }
+  ]
+}
